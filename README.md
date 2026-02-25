@@ -31,9 +31,18 @@ Choose the repository that best suits your location for optimal download speed.
 
 ## 🚀 How to Use (OpenClaw Skill)
 
-This project is designed as an **OpenClaw Skill** and is recommended to be used directly via OpenClaw.
+This project is designed as an **OpenClaw Skill**. If you are using **OpenClaw (龙虾人)**, you can simply copy and paste the following prompt to let it handle everything:
 
-### 1. Install Skill
+> **[OpenClaw User? Copy This]**
+> "Please help me install AIMP meeting skill from `https://gitee.com/wanqianwin/aimp`. 
+> 1. Clone the repo and run `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`. 
+> 2. Run `python3 openclaw-skill/scripts/setup_config.py --interactive` to help me configure my email. 
+> 3. Once done, let's schedule a test meeting!"
+
+### 🐳 Docker & Container Friendly
+The installation script (`install.py`) automatically detects container environments. If `OPENCLAW_ENV` or `DOCKER_ENV` is set, it switches to `requirements_minimal.txt` for a fast, lightweight, and permission-safe installation.
+
+### 1. Install Skill manually
 
 Add this repository as a Skill to your OpenClaw:
 

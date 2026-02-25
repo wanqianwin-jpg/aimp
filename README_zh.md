@@ -13,9 +13,18 @@
 
 ## 🚀 如何使用 (OpenClaw Skill)
 
-本项目设计为 **OpenClaw Skill**，建议通过 OpenClaw 直接使用。
+本项目设计为 **OpenClaw Skill**。如果您正在使用 **OpenClaw (龙虾人)**，只需复制并粘贴以下指令给它，它将自动处理一切：
 
-### 1. 安装 Skill
+> **[龙虾人用户专用指令]**
+> “请帮我从 `https://gitee.com/wanqianwin/aimp` 安装 AIMP 会议 Skill。
+> 1. 克隆仓库并运行 `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`。
+> 2. 运行 `python3 openclaw-skill/scripts/setup_config.py --interactive` 帮我配置邮箱。
+> 3. 完成后，我们发起一个测试会议！”
+
+### 🐳 Docker & 容器化友好支持
+智能安装脚本 (`install.py`) 会自动检测容器环境。如果检测到 `OPENCLAW_ENV` 或 `DOCKER_ENV` 环境变量，它将自动切换到 `requirements_minimal.txt`，以实现快速、轻量且无权限障碍的安装。
+
+### 1. 手动安装 Skill
 
 将本仓库作为 Skill 添加到你的 OpenClaw：
 
