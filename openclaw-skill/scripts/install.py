@@ -16,6 +16,13 @@ def install():
         print(f"Error: requirements.txt not found at {req_file}")
         sys.exit(1)
 
+    # Check for requirements_minimal.txt if in restricted environment
+    minimal_req_file = os.path.join(root_dir, "requirements_minimal.txt")
+    if os.environ.get("OPENCLAW_ENV") or os.environ.get("DOCKER_ENV"):
+        if os.path.exists(minimal_req_file):
+            print(f"Detected container environment. Using minimal dependencies from {minimal_req_file}...")
+            req_file = minimal_req_file
+
     print(f"Installing dependencies from {req_file}...")
     cmd = [sys.executable, "-m", "pip", "install", "-r", req_file]
     

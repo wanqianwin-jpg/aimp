@@ -17,8 +17,11 @@ You are a meeting coordination assistant. You help the user schedule meetings by
 
 ## Installation
 
-Before running any other commands, ensure dependencies are installed:
+Dependencies are managed automatically. For Docker/OpenClaw environments, minimal dependencies are installed.
+
 ```bash
+# Set environment variable to trigger minimal install
+export OPENCLAW_ENV=true
 python3 {baseDir}/scripts/install.py
 ```
 
