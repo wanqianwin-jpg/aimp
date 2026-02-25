@@ -18,7 +18,7 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 _aimp_root = os.path.abspath(os.path.join(_script_dir, "..", ".."))
 sys.path.insert(0, _aimp_root)
 
-from agent import AIMPAgent  # noqa: E402
+from hub_agent import create_agent  # noqa: E402
 from lib.output import emit_event  # noqa: E402
 
 
@@ -31,7 +31,7 @@ def main():
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
 
     try:
-        agent = AIMPAgent(
+        agent = create_agent(
             config_path=args.config,
             notify_mode="stdout",
             db_path=args.db_path,

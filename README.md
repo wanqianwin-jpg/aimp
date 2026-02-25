@@ -6,7 +6,10 @@
 ![License](https://img.shields.io/badge/License-MIT-purple)
 
 > **AIMP (AI Meeting Protocol)** is a minimalist AI Agent meeting negotiation protocol.
-> Multiple Agents, representing different individuals, negotiate a meeting via email and reach a consensus.
+> Agents negotiate meeting times and locations via email and reach consensus automatically.
+>
+> **Hub Mode** (v0.2): One Agent serves a whole family or team. Internal members get instant scheduling via "god view" — no email rounds needed. External contacts still use standard email negotiation.
+>
 > **Fallback Compatibility**: If the recipient does not have an Agent, AIMP automatically sends a natural language email and parses the reply using an LLM.
 
 [中文文档](README_zh.md)
@@ -51,12 +54,16 @@ Add this repository as a Skill to your OpenClaw:
 openclaw skill add aimp-meeting https://github.com/wanqianwin-jpg/aimp
 ```
 
-### 2. Let OpenClaw Configure for You
+### 2. Let OpenClaw help you configure
 
-Type in OpenClaw:
+Enter in OpenClaw:
 > "Help me setup AIMP meeting agent"
 
-OpenClaw will guide you through entering your email info, preferences, and automatically complete the configuration.
+OpenClaw will guide you to enter email information, preferences, and complete the configuration automatically.
+
+> **💡 Note on LLM Configuration**:
+> AIMP is a **Background Agent** that monitors emails and makes decisions independently (e.g., deciding which meeting time is best) even when you're not actively using it. Therefore, it needs its own LLM access.
+> *   **Good News**: If you have already configured `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in your environment, the setup script will automatically detect and reuse them.
 
 ### 3. Schedule a Meeting
 
@@ -86,8 +93,15 @@ python3 openclaw-skill/scripts/setup_config.py --interactive
 ```
 
 ### 3. Run Agent
+
+**Standalone mode** (original):
 ```bash
 python3 agent.py ~/.aimp/config.yaml --notify stdout
+```
+
+**Hub mode** (auto-detected from config):
+```bash
+python3 hub_agent.py ~/.aimp/config.yaml --notify stdout
 ```
 
 -----
@@ -102,23 +116,60 @@ aimp/
 │   ├── negotiator.py             # LLM Negotiation Decision Engine
 │   ├── session_store.py          # SQLite Session Persistence
 │   └── output.py                 # JSON Structured Output
-├── agent.py                      # Agent Main Loop (Supports email/stdout notification modes)
+├── agent.py                      # Standalone Agent (1 person, 1 Agent)
+├── hub_agent.py                  # Hub Agent (1 Agent serves multiple people) ← NEW
 ├── run_demo.py                   # 3-Agent Independent Demo
 ├── config/                       # Demo Configuration
 │
 ├── openclaw-skill/               # OpenClaw Skill Distribution Directory
 │   ├── SKILL.md                  # Skill Definition + Runbook
 │   ├── scripts/
-│   │   ├── initiate.py           # Initiate Meeting
+│   │   ├── initiate.py           # Initiate Meeting (hub/standalone auto-detect)
 │   │   ├── poll.py               # Single Poll
 │   │   ├── respond.py            # Inject Owner Reply
 │   │   ├── status.py             # Query Status
-│   │   └── setup_config.py       # Configuration Generation
+│   │   └── setup_config.py       # Configuration Generation (hub/standalone wizard)
 │   └── references/
 │       ├── protocol-spec.md      # Protocol Specification
-│       └── config-example.yaml   # Configuration Example
+│       └── config-example.yaml   # Configuration Example (both modes)
 │
 └── requirements.txt
+```
+
+## Deployment Modes
+
+| | Hub Mode | Standalone Mode |
+|---|---|---|
+| **Who deploys** | 1 person (the Host) | Each person separately |
+| **Who can use it** | All listed members | Just the owner |
+| **Internal scheduling** | Instant (1 LLM call, no email) | Multi-round email negotiation |
+| **External contacts** | Standard email negotiation | Standard email negotiation |
+| **LLM cost** | Shared, 1 key | Per person |
+| **Config field** | `members:` + `hub:` | `owner:` + `agent:` |
+
+**Hub mode config snippet:**
+```yaml
+mode: hub
+hub:
+  name: "Family Hub"
+  email: "family-hub@gmail.com"
+members:
+  alice:
+    email: "alice@gmail.com"
+    role: "admin"
+    preferences:
+      preferred_times: ["weekday mornings"]
+      preferred_locations: ["Zoom"]
+  bob:
+    email: "bob@gmail.com"
+    role: "member"
+    preferences:
+      preferred_times: ["afternoon 14:00-17:00"]
+      preferred_locations: ["Tencent Meeting"]
+llm:
+  provider: "local"        # Ollama — free, runs on your own machine
+  model: "llama3"
+  base_url: "http://localhost:11434/v1"
 ```
 
 ## Roadmap
@@ -128,14 +179,17 @@ aimp/
     - Human Fallback (Natural Language Parsing)
     - OpenClaw Skill Integration
     - Multi-source Download (GitHub/Gitee)
-- [ ] **v0.2 (Stability)**
-    - [ ] Support more IM integrations (via OpenClaw)
-    - [ ] Improved conflict resolution logic
-    - [ ] Docker support
+- [x] **v0.2 (Hub Mode)**
+    - [x] **Hub Mode**: One Agent serves multiple people (family/team)
+    - [x] **God-view scheduling**: Internal members — 1 LLM call, instant result, no email rounds
+    - [x] **Auto identity recognition**: Whitelist-based sender identification
+    - [x] **Local LLM support** (Ollama/LM Studio): No API key needed
+    - [x] **Hybrid mode**: Hub handles internal fast-path + external email negotiation
 - [ ] **v1.0 (Release)**
-    - [ ] Multi-language support (i18n)
     - [ ] Calendar integration (Google Calendar / Outlook)
+    - [ ] Multi-language support (i18n)
     - [ ] Enterprise deployment guide
+    - [ ] Docker Compose for Hub deployment
 
 ## Protocol Specification
 

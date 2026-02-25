@@ -53,8 +53,23 @@ def main():
 
     try:
         config = load_yaml(args.config)
-        agent_cfg = config["agent"]
-        agent_email = agent_cfg["email"]
+        # 兼容 hub 模式和独立模式
+        if config.get("mode") == "hub" or "members" in config:
+            hub_cfg = config["hub"]
+            agent_email = hub_cfg["email"]
+            agent_cfg = hub_cfg
+            # Hub 模式：用第一个 admin member 的名字作为 owner
+            members = config.get("members", {})
+            owner_name = next(
+                (m.get("name", mid) for mid, m in members.items() if m.get("role") == "admin"),
+                "Hub"
+            )
+            prefs = {}
+        else:
+            agent_cfg = config["agent"]
+            agent_email = agent_cfg["email"]
+            owner_name = config["owner"]["name"]
+            prefs = config.get("preferences", {})
 
         store = SessionStore(args.db_path)
         session = store.load(args.session_id)
@@ -63,9 +78,9 @@ def main():
             sys.exit(1)
 
         negotiator = Negotiator(
-            owner_name=config["owner"]["name"],
+            owner_name=owner_name,
             agent_email=agent_email,
-            preferences=config.get("preferences", {}),
+            preferences=prefs,
             llm_config=config.get("llm", {}),
         )
 

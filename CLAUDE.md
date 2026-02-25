@@ -1,11 +1,13 @@
-# AIMP MVP — Implementation Guide
+# AIMP — Implementation Guide
 
-> Goal: 3 AI Agents representing 3 individuals negotiate a meeting via email and reach a consensus.
+> Goal: AI Agents negotiate meeting schedules via email. Supports Hub mode (one Agent serves many) and Standalone mode (one Agent per person).
 > Constraints: No hash chains, no DID, no permission budget, no signatures, no payments. Only the "runnable" minimum closed loop.
 
 -----
 
 ## I. Architecture
+
+### Standalone Mode (original)
 
 ```
 Alice (Human) ──Preferences──→ Agent-A ──Email──→ ┐
@@ -15,12 +17,25 @@ Carol (Human) ──Preferences──→ Agent-C ──Email──→ ┘
                    └── Result Notification (Email/Terminal) ←──┘
 ```
 
-Core Workflow:
+### Hub Mode (v0.2, recommended)
 
-1. Alice tells her Agent: "Schedule a Q1 review meeting with Bob and Carol"
-2. Agent-A initiates an email thread, Agent-B/C reply automatically
-3. Consensus is reached after multiple rounds of negotiation
-4. Each Agent notifies its owner of the final result
+```
+Alice ─┐
+Bob   ─┼──→ HubAgent (1 email) ──Email──→ External contacts / External Agents
+Carol ─┘         │
+                 │ (internal: no email, direct LLM scheduling)
+                 ↓
+         Notify all members instantly
+```
+
+Hub Mode Core Workflow:
+1. Alice tells Hub: "Schedule a meeting with Bob"
+2. Hub identifies Alice by `From:` email (whitelist check)
+3. Hub reads both Alice's and Bob's preferences directly
+4. 1 LLM call → finds optimal time/location
+5. Hub notifies both Alice and Bob instantly (no email rounds needed)
+
+For external contacts: Hub still sends AIMP/natural-language email and negotiates normally.
 
 **Key Design: Fallback Compatibility**
 
@@ -32,63 +47,109 @@ If the recipient does not have an Agent, send a natural language email to the hu
 
 ```
 aimp/
-├── agent.py              # Agent Main Loop
-├── email_client.py       # IMAP/SMTP Wrapper
-├── protocol.py           # AIMP Protocol Parsing/Generation
-├── negotiator.py         # Negotiation Decision Logic (Calls LLM)
-├── config/
-│   ├── agent_a.yaml      # Agent-A Config (Email, Preferences, Contacts)
-│   ├── agent_b.yaml
-│   └── agent_c.yaml
-├── run_demo.py           # Demo Script to Launch 3 Agents
-└── README.md
+├── lib/
+│   ├── email_client.py       # IMAP/SMTP Wrapper
+│   ├── protocol.py           # AIMP/0.1 Protocol Data Model
+│   ├── negotiator.py         # LLM Decision Engine (standalone + hub negotiators)
+│   ├── session_store.py      # SQLite Session Persistence
+│   └── output.py             # JSON stdout events
+├── agent.py                  # Standalone Agent (1 person, 1 Agent)
+├── hub_agent.py              # Hub Agent (1 Agent, multiple members) ← NEW
+│                             #   - AIMPHubAgent: identity recognition + god-view scheduling
+│                             #   - HubNegotiator: multi-preference optimization
+│                             #   - create_agent(): factory, auto-detects mode from config
+├── run_demo.py               # 3-Agent Standalone Demo
+├── openclaw-skill/
+│   ├── SKILL.md              # OpenClaw runbook (hub + standalone)
+│   └── scripts/
+│       ├── initiate.py       # Uses create_agent(), supports --initiator for hub
+│       ├── poll.py           # Uses create_agent()
+│       ├── respond.py        # Hub-aware config loading
+│       ├── status.py         # Unchanged
+│       └── setup_config.py   # Hub wizard + standalone wizard
+└── references/
+    └── config-example.yaml   # Both mode examples
 ```
 
 -----
 
 ## III. Configuration Format
 
-One YAML config per Agent:
+Auto-detected from file: `members:` field → Hub mode; `owner:` field → Standalone mode.
+
+### Hub Mode Config
 
 ```yaml
-# config/agent_a.yaml
+mode: hub
+hub:
+  name: "Family Hub"
+  email: "family-hub@gmail.com"
+  imap_server: "imap.gmail.com"
+  smtp_server: "smtp.gmail.com"
+  imap_port: 993
+  smtp_port: 465
+  password: "$HUB_PASSWORD"
+
+members:
+  alice:
+    name: "Alice"
+    email: "alice@gmail.com"     # whitelist identity + notification
+    role: "admin"                # admin can manage config; member can only use
+    preferences:
+      preferred_times: ["weekday mornings"]
+      blocked_times: ["Friday afternoons"]
+      preferred_locations: ["Zoom"]
+      auto_accept: true
+  bob:
+    name: "Bob"
+    email: "bob@gmail.com"
+    role: "member"
+    preferences:
+      preferred_times: ["afternoon 14:00-17:00"]
+      preferred_locations: ["Tencent Meeting"]
+      auto_accept: true
+
+contacts:                        # External (outside Hub)
+  Dave:
+    human_email: "dave@gmail.com"
+    has_agent: false
+
+llm:
+  provider: "local"              # Ollama (free, always-on machine)
+  model: "llama3"
+  base_url: "http://localhost:11434/v1"
+```
+
+### Standalone Mode Config (backward compatible)
+
+```yaml
 agent:
   name: "Alice's Assistant"
   email: "alice-agent@example.com"
   imap_server: "imap.example.com"
   smtp_server: "smtp.example.com"
-  password: "xxx"  # Or reference environment variable
+  password: "$AGENT_PASSWORD"
 
 owner:
   name: "Alice"
-  email: "alice@gmail.com"  # Human email for notifications
+  email: "alice@gmail.com"
 
 preferences:
-  preferred_times:
-    - "weekday mornings 9:00-12:00"
-    - "2026-03-01"
-  blocked_times:
-    - "2026-03-03"
-    - "Friday afternoons"
-  preferred_locations:
-    - "Zoom"
-    - "Tencent Meeting"
-  auto_accept: true  # Automatically accept if preferences match perfectly
+  preferred_times: ["weekday mornings 9:00-12:00"]
+  blocked_times: ["Friday afternoons"]
+  preferred_locations: ["Zoom"]
+  auto_accept: true
 
 contacts:
   Bob:
-    agent_email: "bob-agent@example.com"    # If they have an Agent
-    human_email: "bob@gmail.com"            # Fallback if no Agent
-    has_agent: true
-  Carol:
-    agent_email: "carol-agent@example.com"
-    human_email: "carol@gmail.com"
+    agent_email: "bob-agent@example.com"
+    human_email: "bob@gmail.com"
     has_agent: true
 
 llm:
-  provider: "anthropic"   # Or "openai"
+  provider: "anthropic"
   model: "claude-sonnet-4-5-20250514"
-  api_key_env: "ANTHROPIC_API_KEY"  # Read from environment variable
+  api_key_env: "ANTHROPIC_API_KEY"
 ```
 
 -----

@@ -17,17 +17,21 @@ logger = logging.getLogger(__name__)
 def make_llm_client(llm_config: dict):
     provider = llm_config.get("provider", "anthropic")
     api_key_env = llm_config.get("api_key_env", "ANTHROPIC_API_KEY")
+    base_url = llm_config.get("base_url")  # 用于支持 Ollama/LM Studio
     import os
-    api_key = os.environ.get(api_key_env)
-    if not api_key:
-        raise ValueError(f"环境变量 {api_key_env} 未设置")
-
+    
+    # 本地模型通常不需要 API Key
+    api_key = os.environ.get(api_key_env, "sk-no-key-needed")
+    
     if provider == "anthropic":
         import anthropic
         return anthropic.Anthropic(api_key=api_key), llm_config.get("model", "claude-sonnet-4-5-20250514"), "anthropic"
-    elif provider == "openai":
+    elif provider == "openai" or provider == "local":
         import openai
-        return openai.OpenAI(api_key=api_key), llm_config.get("model", "gpt-4o"), "openai"
+        # 如果是 local provider 且提供了 base_url，则连接本地 API
+        client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        model = llm_config.get("model", "gpt-4o")
+        return client, model, "openai"
     else:
         raise ValueError(f"不支持的 LLM provider: {provider}")
 

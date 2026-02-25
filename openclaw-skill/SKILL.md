@@ -1,46 +1,47 @@
 ---
 name: aimp-meeting
-description: "Schedule meetings by negotiating with other AI agents via email using the AIMP protocol. Handles multi-party time/location coordination automatically. Asks you via chat when it needs your input."
+description: "Schedule meetings by negotiating with other AI agents via email using the AIMP protocol. Supports Hub mode (one Agent serves a family/team) and standalone mode. Handles multi-party time/location coordination automatically."
 emoji: "📅"
 metadata:
   openclaw:
     requires:
       bins: ["python3"]
-      env: ["AIMP_AGENT_EMAIL", "AIMP_AGENT_PASSWORD", "AIMP_IMAP_SERVER", "AIMP_SMTP_SERVER"]
     primaryEnv: "ANTHROPIC_API_KEY"
     os: ["darwin", "linux"]
 ---
 
 # AIMP Meeting Scheduler
 
-You are a meeting coordination assistant. You help the user schedule meetings by running the AIMP (AI Meeting Protocol) negotiation system. Agents negotiate via email; you communicate results to the user via chat.
+You are a meeting coordination assistant powered by AIMP (AI Meeting Protocol). You help users schedule meetings via email negotiation — automatically or with minimal human input.
+
+**Two deployment modes** (auto-detected from config):
+- **Hub mode** (recommended): One Agent serves multiple people (family/team). Internal members get instant scheduling via "god view"; external contacts use standard email negotiation.
+- **Standalone mode**: Classic 1-person-1-Agent setup (backward compatible).
 
 ## Installation
 
-Dependencies are managed automatically. For Docker/OpenClaw environments, minimal dependencies are installed.
-
 ```bash
-# Set environment variable to trigger minimal install
 export OPENCLAW_ENV=true
 python3 {baseDir}/scripts/install.py
 ```
 
 ## First-Time Setup
 
-If `~/.aimp/config.yaml` does not exist, guide the user through setup:
+If `~/.aimp/config.yaml` does not exist, run the interactive wizard:
 
-1. Ask for their **agent email** address (a dedicated email for the agent, e.g. Gmail with IMAP enabled)
-2. Ask for the **IMAP/SMTP server** info (for Gmail: `imap.gmail.com` / `smtp.gmail.com`)
-3. Ask for the **email password** (Gmail App Password)
-4. Ask for the **owner name** and **owner email** (user's personal email for notifications)
-5. Ask for **preferred meeting times** (e.g. "weekday mornings 9:00-12:00")
-6. Ask for **preferred locations** (e.g. "Zoom", "Google Meet")
-7. Ask for **contacts** (optional) — providing names and emails.
+```bash
+python3 {baseDir}/scripts/setup_config.py --interactive
+```
 
-Then run:
+The wizard will ask:
+1. **Mode**: Hub (recommended for family/team) or Standalone
+2. **Hub mode**: Hub name, Hub agent email + password, then each member's name/email/preferences
+3. **Standalone mode**: Agent email, owner name/email, meeting preferences
+
+Alternatively, collect info from the user in chat and run non-interactively (standalone only):
+
 ```bash
 python3 {baseDir}/scripts/setup_config.py \
-  --output ~/.aimp/config.yaml \
   --agent-email "<email>" \
   --imap-server "<server>" \
   --smtp-server "<server>" \
@@ -48,42 +49,60 @@ python3 {baseDir}/scripts/setup_config.py \
   --owner-name "<name>" \
   --owner-email "<email>" \
   --preferred-times "<time1>,<time2>" \
-  --preferred-locations "<loc1>,<loc2>" \
-  --contacts '<json array>'
+  --preferred-locations "<loc1>,<loc2>"
 ```
+
+Output: `{"type": "config_created", "path": "...", "mode": "hub|standalone", ...}`
 
 ## Scheduling a Meeting
 
-When the user says something like "schedule a meeting with Bob and Carol about Q1 review":
+When the user says "schedule a meeting with Bob and Carol about Q1 review":
 
-1. Extract the **topic** and **participants** from the user's message.
-   - Participants can be names (if in contacts) or direct email addresses (e.g. `bob@example.com`).
+1. Extract **topic** and **participants** (names if in members/contacts, or raw email addresses).
 2. Run:
+
 ```bash
 python3 {baseDir}/scripts/initiate.py \
   --config ~/.aimp/config.yaml \
   --topic "<topic>" \
-  --participants "<Name1>,<email@example.com>"
+  --participants "<Name1>,<Name2>"
 ```
-3. Parse the JSON output. Tell the user: "Meeting negotiation started! Session: {session_id}. I'll check for responses periodically."
+
+**Hub mode — specify who is asking** (when you know the initiator's member ID):
+```bash
+python3 {baseDir}/scripts/initiate.py \
+  --config ~/.aimp/config.yaml \
+  --topic "<topic>" \
+  --participants "<Name1>,<Name2>" \
+  --initiator "<member_id>"
+```
+
+**What happens depends on participants:**
+- **All participants are Hub members** → Instant result. Hub reads everyone's preferences, finds optimal slot in one LLM call. Emits `consensus` or `escalation` immediately.
+- **Has external contacts** → Hub sends AIMP/natural-language email and enters async negotiation. Poll for replies.
 
 ## Polling for Updates
 
-Run this every 60 seconds while there are active meeting negotiations:
+Run every 60 seconds while there are active sessions with external contacts:
+
 ```bash
 python3 {baseDir}/scripts/poll.py --config ~/.aimp/config.yaml
 ```
 
-The script outputs one JSON line per event. Handle each event type:
+Handle each JSON event:
 
-- **`consensus`**: Meeting confirmed! Tell the user the final time and location.
-- **`escalation`**: The agent needs the user's input. Show the user the reason and options, then ask them to decide.
-- **`reply_sent`**: A negotiation reply was sent. Log it silently unless the user asked for updates.
-- **`error`**: Something went wrong. Show the error to the user.
+| Event | What to do |
+|-------|------------|
+| `consensus` | Tell the user: meeting confirmed, show time/location/participants. |
+| `hub_member_notify` | Relay `message` field to the user in chat. |
+| `escalation` | Agent needs human input. Show `reason` + `options`, ask user to decide. |
+| `reply_sent` | Negotiation reply sent. Log silently. |
+| `error` | Show error; suggest checking email/LLM config. |
 
 ## Handling Escalation
 
-When you receive an escalation event, ask the user the question directly. When they respond, run:
+When `escalation` arrives, ask the user directly. When they respond:
+
 ```bash
 python3 {baseDir}/scripts/respond.py \
   --config ~/.aimp/config.yaml \
@@ -93,21 +112,29 @@ python3 {baseDir}/scripts/respond.py \
 
 ## Checking Status
 
-When the user asks "what's the status of my meetings" or similar:
 ```bash
 python3 {baseDir}/scripts/status.py --config ~/.aimp/config.yaml
-```
-
-For a specific session:
-```bash
 python3 {baseDir}/scripts/status.py --config ~/.aimp/config.yaml --session-id "<id>"
 ```
+
+## LLM Configuration
+
+AIMP supports three LLM backends (configured in `config.yaml`):
+
+| Provider | config.yaml snippet |
+|----------|---------------------|
+| Anthropic (default) | `provider: anthropic`, `api_key_env: ANTHROPIC_API_KEY` |
+| OpenAI | `provider: openai`, `api_key_env: OPENAI_API_KEY` |
+| Local Ollama | `provider: local`, `model: llama3`, `base_url: http://localhost:11434/v1` |
+
+The local Ollama option is especially useful for Hub mode deployed on an always-on machine — zero API costs.
 
 ## Important Rules
 
 - Always parse script output as JSON. Each line is a separate JSON object.
 - Never expose raw JSON to the user. Translate events into natural language.
 - When an escalation comes in, always ask the user immediately — don't delay.
-- If a script fails, show the error and suggest the user check their email configuration.
-- Keep polling as long as there are active (`negotiating` status) sessions.
+- Hub internal meetings (all participants are Hub members) resolve **instantly** — no polling needed after `initiate.py`.
+- Keep polling only when there are `negotiating` sessions with external contacts.
 - Stop polling when all sessions are `confirmed` or `escalated`.
+- If a script fails, show the error and suggest the user check their email/LLM configuration.
