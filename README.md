@@ -1,124 +1,134 @@
 # AIMP — AI Meeting Protocol
 
-> **AIMP (AI Meeting Protocol)** 是一个极简的 AI Agent 会议协商协议。
-> 3 个 Agent 分别代表 3 个人，通过邮件协商一次会议，最终达成共识。
-> 支持降级兼容：对方如果没有 Agent，会自动发自然语言邮件并解析回复。
+> **AIMP (AI Meeting Protocol)** is a minimalist AI Agent meeting negotiation protocol.
+> Three Agents, representing three individuals, negotiate a meeting via email and reach a consensus.
+> **Fallback Compatibility**: If the recipient does not have an Agent, AIMP automatically sends a natural language email and parses the reply using an LLM.
 
-## 🚀 如何使用 (OpenClaw Skill)
+[中文文档](README_zh.md)
 
-本项目设计为 **OpenClaw Skill**，建议通过 OpenClaw 直接使用。
+## 🚀 How to Use (OpenClaw Skill)
 
-### 1. 安装 Skill
+This project is designed as an **OpenClaw Skill** and is recommended to be used directly via OpenClaw.
 
-将本仓库作为 Skill 添加到你的 OpenClaw：
+### 1. Install Skill
+
+Add this repository as a Skill to your OpenClaw:
 
 ```bash
-# 假设你已经安装了 OpenClaw
-openclaw skill add aimp-meeting ./aimp/openclaw-skill
+# Assuming you have OpenClaw installed
+openclaw skill add aimp-meeting https://gitee.com/wanqianwin/aimp
 ```
 
-### 2. 让 OpenClaw 帮你配置
+### 2. Let OpenClaw Configure for You
 
-在 OpenClaw 中输入：
+Type in OpenClaw:
 > "Help me setup AIMP meeting agent"
 
-OpenClaw 会引导你输入邮箱信息、偏好设置，并自动完成配置。
+OpenClaw will guide you through entering your email info, preferences, and automatically complete the configuration.
 
-### 3. 发起会议
+### 3. Schedule a Meeting
 
-直接告诉 OpenClaw：
+Tell OpenClaw directly:
 > "Schedule a meeting with bob@example.com about Project X review"
 
-OpenClaw 会：
-1.  自动发起邮件协商。
-2.  定期检查回复。
-3.  如果对方是人类，自动解析自然语言回复。
-4.  达成共识后通知你。
+OpenClaw will:
+1.  Automatically initiate email negotiation.
+2.  Periodically check for replies.
+3.  If the recipient is human, automatically parse the natural language reply.
+4.  Notify you after consensus is reached.
 
 -----
 
-## 🛠️ 手动开发与测试
+## 🛠️ Manual Development & Testing
 
-如果你是开发者，想手动运行或调试：
+If you are a developer and want to run or debug manually:
 
-### 1. 安装依赖
+### 1. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 生成配置
+### 2. Generate Configuration
 ```bash
 python3 openclaw-skill/scripts/setup_config.py --interactive
 ```
 
-### 3. 运行 Agent
+### 3. Run Agent
 ```bash
 python3 agent.py ~/.aimp/config.yaml --notify stdout
 ```
 
 -----
 
-## 一、整体架构
+## Architecture
 
 ```
 aimp/
-├── lib/                          # 核心库
-│   ├── email_client.py           # IMAP/SMTP 收发封装
-│   ├── protocol.py               # AIMP/0.1 协议数据模型
-│   ├── negotiator.py             # LLM 协商决策引擎
-│   ├── session_store.py          # SQLite 会话持久化
-│   └── output.py                 # JSON 结构化输出
-├── agent.py                      # Agent 主循环（支持 email/stdout 通知模式）
-├── run_demo.py                   # 3 Agent 独立演示
-├── config/                       # 演示用配置
+├── lib/                          # Core Library
+│   ├── email_client.py           # IMAP/SMTP Wrapper
+│   ├── protocol.py               # AIMP/0.1 Protocol Data Model
+│   ├── negotiator.py             # LLM Negotiation Decision Engine
+│   ├── session_store.py          # SQLite Session Persistence
+│   └── output.py                 # JSON Structured Output
+├── agent.py                      # Agent Main Loop (Supports email/stdout notification modes)
+├── run_demo.py                   # 3-Agent Independent Demo
+├── config/                       # Demo Configuration
 │
-├── openclaw-skill/               # OpenClaw Skill 发布目录
-│   ├── SKILL.md                  # Skill 定义 + runbook
+├── openclaw-skill/               # OpenClaw Skill Distribution Directory
+│   ├── SKILL.md                  # Skill Definition + Runbook
 │   ├── scripts/
-│   │   ├── initiate.py           # 发起会议
-│   │   ├── poll.py               # 单次轮询
-│   │   ├── respond.py            # 注入主人回复
-│   │   ├── status.py             # 查询状态
-│   │   └── setup_config.py       # 配置生成
+│   │   ├── initiate.py           # Initiate Meeting
+│   │   ├── poll.py               # Single Poll
+│   │   ├── respond.py            # Inject Owner Reply
+│   │   ├── status.py             # Query Status
+│   │   └── setup_config.py       # Configuration Generation
 │   └── references/
-│       ├── protocol-spec.md      # 协议规范
-│       └── config-example.yaml   # 配置示例
+│       ├── protocol-spec.md      # Protocol Specification
+│       └── config-example.yaml   # Configuration Example
 │
 └── requirements.txt
 ```
 
-## 协议说明
+## Roadmap
 
-邮件 Subject: `[AIMP:<session_id>] v<version> <topic>`
+- [x] **v0.1 (MVP)**
+    - Basic Email Negotiation Protocol
+    - Human Fallback (Natural Language Parsing)
+    - OpenClaw Skill Integration
+- [ ] **v0.2 (Stability)**
+    - [ ] Support more IM integrations (via OpenClaw)
+    - [ ] Improved conflict resolution logic
+    - [ ] Docker support
+- [ ] **v1.0 (Release)**
+    - [ ] Multi-language support (i18n)
+    - [ ] Calendar integration (Google Calendar / Outlook)
+    - [ ] Enterprise deployment guide
 
-| action   | 含义         |
-|----------|------------|
-| propose  | 发起提议       |
-| accept   | 接受当前提议     |
-| counter  | 反提议        |
-| confirm  | 最终确认       |
-| escalate | 升级给人类      |
+## Protocol Specification
 
-超过 5 轮未达成共识，自动通知人类介入。
+Email Subject: `[AIMP:<session_id>] v<version> <topic>`
 
-## 两种通知模式
+| action   | Meaning      | Trigger Condition |
+|----------|--------------|-------------------|
+| propose  | Initiate Proposal | Human requests a meeting |
+| accept   | Accept Proposal   | All items match preferences |
+| counter  | Counter Proposal  | Partial match, propose alternatives |
+| confirm  | Final Confirmation| All participants accept |
+| escalate | Escalate to Human | Cannot decide automatically |
 
-| 模式 | 用途 | escalation 方式 |
-|------|------|----------------|
-| `email` | 独立运行 | 发邮件给主人 |
-| `stdout` | OpenClaw Skill | 输出 JSON 事件，由 OpenClaw 转发到 IM |
+If consensus is not reached after 5 rounds, it automatically escalates to human intervention.
 
-## 降级兼容
+## Fallback Compatibility
 
-联系人没有 Agent 时（`has_agent: false`），自动发自然语言邮件，用 LLM 解析人类的自由文本回复。
+When a contact does not have an Agent (`has_agent: false`), a natural language email is automatically sent, and the human's free-text reply is parsed using an LLM.
 
-## 环境变量
+## Environment Variables
 
-| 变量 | 说明 |
-|------|------|
-| `ANTHROPIC_API_KEY` | Anthropic API 密钥 |
-| `AIMP_AGENT_EMAIL` | Agent 邮箱 |
-| `AIMP_AGENT_PASSWORD` | Agent 邮箱密码 |
-| `AIMP_IMAP_SERVER` | IMAP 服务器 |
-| `AIMP_SMTP_SERVER` | SMTP 服务器 |
-| `AIMP_POLL_INTERVAL` | 轮询间隔（秒，默认 15） |
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Anthropic API Key |
+| `AIMP_AGENT_EMAIL` | Agent Email |
+| `AIMP_AGENT_PASSWORD` | Agent Email Password |
+| `AIMP_IMAP_SERVER` | IMAP Server |
+| `AIMP_SMTP_SERVER` | SMTP Server |
+| `AIMP_POLL_INTERVAL` | Poll Interval (seconds, default 15) |
