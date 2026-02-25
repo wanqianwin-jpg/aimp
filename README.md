@@ -156,3 +156,15 @@ When a contact does not have an Agent (`has_agent: false`), a natural language e
 | `AIMP_IMAP_SERVER` | IMAP Server |
 | `AIMP_SMTP_SERVER` | SMTP Server |
 | `AIMP_POLL_INTERVAL` | Poll Interval (seconds, default 15) |
+
+## 🤖 AI Tool Usage Declaration
+
+This project proudly leverages advanced AI tools for development. We believe in transparency and the future of AI-native software engineering.
+
+- **IDE**: Trae (Powered by Gemini-1.5-Pro / Claude-3.5-Sonnet)
+- **CLI**: Claude Code (Claude 3.7 Sonnet)
+- **Model**: Gemini 1.5 Pro
+
+For detailed usage scenarios and responsibility declaration, please refer to [AI_USAGE.md](AI_USAGE.md).
+
+## 📄 License

@@ -163,3 +163,15 @@ aimp/
 | `AIMP_IMAP_SERVER` | IMAP 服务器 |
 | `AIMP_SMTP_SERVER` | SMTP 服务器 |
 | `AIMP_POLL_INTERVAL` | 轮询间隔（秒，默认 15） |
+
+## 🤖 AI 工具使用声明
+
+本项目自豪地采用先进的 AI 工具进行开发。我们信仰透明度以及 AI 原生软件工程的未来。
+
+- **IDE**: Trae (由 Gemini-1.5-Pro / Claude-3.5-Sonnet 驱动)
+- **CLI**: Claude Code (Claude 3.7 Sonnet)
+- **模型**: Gemini 1.5 Pro
+
+关于具体的使用场景和责任声明，请参阅 [AI_USAGE.md](AI_USAGE.md)。
+
+## 📄 许可证
