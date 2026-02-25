@@ -59,6 +59,12 @@ python3 {baseDir}/scripts/setup_config.py \
   --mode "standalone"            # or "hub" if user requested
 ```
 
+**Common Email Issues (Troubleshooting):**
+- **Outlook/Hotmail/Live**: Microsoft disabled basic auth. User **MUST** enable 2FA and generate an **App Password**.
+- **QQ/163**: User must enable SMTP/IMAP in settings and use an **Authorization Code** (not login password).
+- **Gmail**: User must enable 2FA and generate an **App Password**.
+- If `setup_config.py` fails with auth error, explain this to the user and ask them to generate an App Password.
+
 **If Hub Mode**: You may need to edit `~/.aimp/config.yaml` manually after generation to add more members under `hub: owners: [...]`.
 
 Output: `{"type": "config_created", "path": "...", "mode": "hub|standalone", ...}`

@@ -84,14 +84,24 @@ def ask_email_config(label="Agent"):
     email = get_input(f"{label} 邮箱地址")
 
     default_imap, default_smtp = "imap.gmail.com", "smtp.gmail.com"
-    if "@outlook.com" in email or "@hotmail.com" in email:
+    if "@outlook.com" in email or "@hotmail.com" in email or "@live.com" in email:
         default_imap, default_smtp = "outlook.office365.com", "smtp.office365.com"
+        print("\n[⚠️ Outlook/Hotmail 用户注意]")
+        print("  微软已禁用普通密码登录。你必须：")
+        print("  1. 在微软账户开启双重验证 (2FA)")
+        print("  2. 生成应用专用密码 (App Password)")
+        print("  3. 在 Outlook 网页版设置中启用 POP/IMAP")
+        print("  详情参考: https://support.microsoft.com/en-us/account-billing/using-app-passwords-with-apps-that-don-t-support-two-step-verification-5896ed9b-4263-e681-128a-a6f2979a7944")
     elif "@yahoo.com" in email:
         default_imap, default_smtp = "imap.mail.yahoo.com", "smtp.mail.yahoo.com"
     elif "@qq.com" in email:
         default_imap, default_smtp = "imap.qq.com", "smtp.qq.com"
+        print("\n[⚠️ QQ 邮箱用户注意]")
+        print("  QQ 邮箱需要开启 SMTP/IMAP 服务并使用授权码作为密码。")
     elif "@163.com" in email:
         default_imap, default_smtp = "imap.163.com", "smtp.163.com"
+        print("\n[⚠️ 163 邮箱用户注意]")
+        print("  网易邮箱需要开启 SMTP/IMAP 服务并使用授权码。")
 
     imap_server = get_input("IMAP 服务器", default_imap)
     smtp_server = get_input("SMTP 服务器", default_smtp)
