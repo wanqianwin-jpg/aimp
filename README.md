@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/License-MIT-purple)
 
 > **AIMP (AI Meeting Protocol)** is a minimalist AI Agent meeting negotiation protocol.
-> Three Agents, representing three individuals, negotiate a meeting via email and reach a consensus.
+> Multiple Agents, representing different individuals, negotiate a meeting via email and reach a consensus.
 > **Fallback Compatibility**: If the recipient does not have an Agent, AIMP automatically sends a natural language email and parses the reply using an LLM.
 
 [中文文档](README_zh.md)
@@ -25,7 +25,7 @@ Choose the repository that best suits your location for optimal download speed.
 
 > **Note**: If you are in mainland China and experience slow connection to GitHub, please use the **Gitee** mirror.
 
-### 💻 OS-Specific Instructions
+## 💻 OS-Specific Instructions
 - **macOS / Linux**: Open Terminal and run the `git clone` command above.
 - **Windows**: Open PowerShell or Command Prompt (cmd) and run the command.
 
@@ -34,7 +34,7 @@ Choose the repository that best suits your location for optimal download speed.
 This project is designed as an **OpenClaw Skill**. If you are using **OpenClaw (龙虾人)**, you can simply copy and paste the following prompt to let it handle everything:
 
 > **[OpenClaw User? Copy This]**
-> "Please help me install AIMP meeting skill from `https://gitee.com/wanqianwin/aimp`. 
+> "Please help me install AIMP meeting skill from `https://gitee.com/wanqianwin/aimp` or `https://github.com/wanqianwin-jpg/aimp`. 
 > 1. Clone the repo and run `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`. 
 > 2. Run `python3 openclaw-skill/scripts/setup_config.py --interactive` to help me configure my email. 
 > 3. Once done, let's schedule a test meeting!"

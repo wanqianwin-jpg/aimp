@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/License-MIT-purple)
 
 > **AIMP (AI Meeting Protocol)** 是一个极简的 AI Agent 会议协商协议。
-> 3 个 Agent 分别代表 3 个人，通过邮件协商一次会议，最终达成共识。
+> 多个 Agent 分别代表不同的人，通过邮件协商一次会议，最终达成共识。
 > 支持降级兼容：对方如果没有 Agent，会自动发自然语言邮件并解析回复。
 
 [English Documentation](README.md)
@@ -16,7 +16,7 @@
 本项目设计为 **OpenClaw Skill**。如果您正在使用 **OpenClaw (龙虾人)**，只需复制并粘贴以下指令给它，它将自动处理一切：
 
 > **[龙虾人用户专用指令]**
-> “请帮我从 `https://gitee.com/wanqianwin/aimp` 安装 AIMP 会议 Skill。
+> “请帮我从 `https://gitee.com/wanqianwin/aimp` (国内) 或 `https://github.com/wanqianwin-jpg/aimp` (国际) 安装 AIMP 会议 Skill。
 > 1. 克隆仓库并运行 `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`。
 > 2. 运行 `python3 openclaw-skill/scripts/setup_config.py --interactive` 帮我配置邮箱。
 > 3. 完成后，我们发起一个测试会议！”
@@ -88,7 +88,7 @@ python3 agent.py ~/.aimp/config.yaml --notify stdout
 
 > **提示**: 国内用户请优先使用 **Gitee** 镜像，以获得最佳下载体验。
 
-### 💻 操作系统说明
+## 💻 操作系统说明
 - **macOS / Linux**: 打开终端 (Terminal) 运行上述命令。
 - **Windows**: 打开 PowerShell 或 命令提示符 (cmd) 运行命令。
 
