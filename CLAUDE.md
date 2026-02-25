@@ -503,12 +503,15 @@ except KeyboardInterrupt:
 
 ## VIII. Preparation Checklist
 
-Before construction:
+Pre-implementation checklist:
 
-1. **3 Email Accounts** (Gmail/Outlook/Any IMAP supported), enable IMAP and App Password
-1. **One LLM API Key** (Anthropic or OpenAI)
-1. **Python 3.10+**
-1. **Dependencies**: `imaplib` (stdlib), `smtplib` (stdlib), `pyyaml`, `anthropic` (or `openai`)
+1.  **Get Source Code**:
+    -   GitHub: `git clone https://github.com/wanqianwin-jpg/aimp.git`
+    -   Gitee: `git clone https://gitee.com/wanqianwin/aimp.git`
+2.  **3 Email Accounts** (Gmail/Outlook/Any IMAP supported), enable IMAP and App Password.
+3.  **LLM API Key** (Anthropic or OpenAI).
+4.  **Python 3.10+**.
+5.  **Dependencies**: `imaplib` (std), `smtplib` (std), `pyyaml`, `anthropic` (or `openai`).
 
 -----
 

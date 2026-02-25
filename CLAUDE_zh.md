@@ -505,10 +505,13 @@ except KeyboardInterrupt:
 
 施工前需要准备：
 
-1. **3 个邮箱账号**（Gmail/Outlook/任何支持 IMAP 的），开启 IMAP 访问和应用专用密码
-1. **一个 LLM API Key**（Anthropic 或 OpenAI）
-1. **Python 3.10+**
-1. **依赖**：`imaplib`（标准库）、`smtplib`（标准库）、`pyyaml`、`anthropic`（或 `openai`）
+1.  **获取源码**：
+    *   Gitee (推荐): `git clone https://gitee.com/wanqianwin/aimp.git`
+    *   GitHub: `git clone https://github.com/wanqianwin-jpg/aimp.git`
+2.  **3 个邮箱账号**（Gmail/Outlook/任何支持 IMAP 的），开启 IMAP 访问和应用专用密码
+3.  **一个 LLM API Key**（Anthropic 或 OpenAI）
+4.  **Python 3.10+**
+5.  **依赖**：`imaplib`（标准库）、`smtplib`（标准库）、`pyyaml`、`anthropic`（或 `openai`）
 
 -----
 

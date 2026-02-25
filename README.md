@@ -6,6 +6,24 @@
 
 [中文文档](README_zh.md)
 
+## 📥 Get Source Code
+
+Choose the repository that best suits your location for optimal download speed.
+
+### Option 1: GitHub (International Recommended)
+- **HTTPS**: `git clone https://github.com/wanqianwin-jpg/aimp.git`
+- **SSH**: `git clone git@github.com:wanqianwin-jpg/aimp.git`
+
+### Option 2: Gitee (China Recommended - Faster)
+- **HTTPS**: `git clone https://gitee.com/wanqianwin/aimp.git`
+- **SSH**: `git clone git@gitee.com:wanqianwin/aimp.git`
+
+> **Note**: If you are in mainland China and experience slow connection to GitHub, please use the **Gitee** mirror.
+
+### 💻 OS-Specific Instructions
+- **macOS / Linux**: Open Terminal and run the `git clone` command above.
+- **Windows**: Open PowerShell or Command Prompt (cmd) and run the command.
+
 ## 🚀 How to Use (OpenClaw Skill)
 
 This project is designed as an **OpenClaw Skill** and is recommended to be used directly via OpenClaw.
@@ -16,7 +34,7 @@ Add this repository as a Skill to your OpenClaw:
 
 ```bash
 # Assuming you have OpenClaw installed
-openclaw skill add aimp-meeting https://gitee.com/wanqianwin/aimp
+openclaw skill add aimp-meeting https://github.com/wanqianwin-jpg/aimp
 ```
 
 ### 2. Let OpenClaw Configure for You
@@ -95,6 +113,7 @@ aimp/
     - Basic Email Negotiation Protocol
     - Human Fallback (Natural Language Parsing)
     - OpenClaw Skill Integration
+    - Multi-source Download (GitHub/Gitee)
 - [ ] **v0.2 (Stability)**
     - [ ] Support more IM integrations (via OpenClaw)
     - [ ] Improved conflict resolution logic

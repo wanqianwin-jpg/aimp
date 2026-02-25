@@ -56,8 +56,9 @@ Please follow these steps to have your contribution considered by the maintainer
 ## Setting Up Your Development Environment
 
 1.  Clone the repository
+    -   **GitHub**: `git clone https://github.com/wanqianwin-jpg/aimp.git`
+    -   **Gitee**: `git clone https://gitee.com/wanqianwin/aimp.git`
     ```bash
-    git clone https://github.com/your-username/aimp.git
     cd aimp
     ```
 

@@ -5,6 +5,9 @@ import os
 
 def install():
     # Locate requirements.txt relative to this script
+    # Source Code:
+    #   GitHub: https://github.com/wanqianwin-jpg/aimp.git
+    #   Gitee:  https://gitee.com/wanqianwin/aimp.git
     script_dir = os.path.dirname(os.path.abspath(__file__))
     root_dir = os.path.abspath(os.path.join(script_dir, "..", ".."))
     req_file = os.path.join(root_dir, "requirements.txt")

@@ -60,6 +60,24 @@ python3 agent.py ~/.aimp/config.yaml --notify stdout
 
 -----
 
+## 📥 获取源码 (Download)
+
+请根据您所在的网络环境选择最快的仓库地址。
+
+### 选项 1: Gitee 码云 (国内推荐 - 极速)
+- **HTTPS**: `git clone https://gitee.com/wanqianwin/aimp.git`
+- **SSH**: `git clone git@gitee.com:wanqianwin/aimp.git`
+
+### 选项 2: GitHub (国际源)
+- **HTTPS**: `git clone https://github.com/wanqianwin-jpg/aimp.git`
+- **SSH**: `git clone git@github.com:wanqianwin-jpg/aimp.git`
+
+> **提示**: 国内用户请优先使用 **Gitee** 镜像，以获得最佳下载体验。
+
+### 💻 操作系统说明
+- **macOS / Linux**: 打开终端 (Terminal) 运行上述命令。
+- **Windows**: 打开 PowerShell 或 命令提示符 (cmd) 运行命令。
+
 ## 一、整体架构
 
 ```
@@ -95,6 +113,7 @@ aimp/
     - 基础邮件协商协议
     - 人类降级兼容 (自然语言解析)
     - OpenClaw Skill 集成
+    - 多源下载支持 (GitHub/Gitee)
 - [ ] **v0.2 (Stability)**
     - [ ] 支持更多 IM 集成 (via OpenClaw)
     - [ ] 改进冲突解决逻辑
