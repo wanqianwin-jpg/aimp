@@ -27,30 +27,39 @@ python3 {baseDir}/scripts/install.py
 
 ## First-Time Setup
 
-If `~/.aimp/config.yaml` does not exist, run the interactive wizard:
+**CRITICAL: Do NOT run `setup_config.py --interactive` directly.** The user cannot interact with the terminal.
+Instead, you must **ask the user** for the following information in the chat, then run the script with arguments.
 
-```bash
-python3 {baseDir}/scripts/setup_config.py --interactive
-```
+### 1. Ask User for Mode & Email
+Ask: "Do you want to set this up for just yourself (Standalone) or for a team/family (Hub Mode)?"
 
-The wizard will ask:
-1. **Mode**: Hub (recommended for family/team) or Standalone
-2. **Hub mode**: Hub name, Hub agent email + password, then each member's name/email/preferences
-3. **Standalone mode**: Agent email, owner name/email, meeting preferences
+- **Standalone**: Ask for Owner Name, Owner Email.
+- **Hub Mode**: Ask for Hub Name (e.g., "Family Agent"), Admin Name, Admin Email.
 
-Alternatively, collect info from the user in chat and run non-interactively (standalone only):
+### 2. Ask for Agent Email Credentials
+Ask: "I need an email address for the AI Agent to send/receive messages.
+Please provide:
+1. Email Address (e.g., ai-agent@outlook.com, @gmail.com, @qq.com)
+2. Password (App Password recommended for Gmail/Outlook/QQ)"
+
+**Note**: AIMP supports any IMAP/SMTP provider (Outlook, Gmail, QQ, 163, etc.). Do not force Gmail.
+
+### 3. Generate Config (Non-Interactive)
+Once you have the info, run this command (replace placeholders):
 
 ```bash
 python3 {baseDir}/scripts/setup_config.py \
-  --agent-email "<email>" \
-  --imap-server "<server>" \
-  --smtp-server "<server>" \
-  --password "<password>" \
-  --owner-name "<name>" \
-  --owner-email "<email>" \
-  --preferred-times "<time1>,<time2>" \
-  --preferred-locations "<loc1>,<loc2>"
+  --output ~/.aimp/config.yaml \
+  --agent-email "AGENT_EMAIL" \
+  --password "AGENT_PASSWORD" \
+  --imap-server "IMAP_SERVER" \  # Auto-guess if possible (e.g. imap.gmail.com, outlook.office365.com)
+  --smtp-server "SMTP_SERVER" \  # Auto-guess if possible (e.g. smtp.gmail.com, smtp.office365.com)
+  --owner-name "OWNER_NAME" \
+  --owner-email "OWNER_EMAIL" \
+  --mode "standalone"            # or "hub" if user requested
 ```
+
+**If Hub Mode**: You may need to edit `~/.aimp/config.yaml` manually after generation to add more members under `hub: owners: [...]`.
 
 Output: `{"type": "config_created", "path": "...", "mode": "hub|standalone", ...}`
 
