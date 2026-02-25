@@ -1,5 +1,10 @@
 # AIMP — AI Meeting Protocol
 
+![Status](https://img.shields.io/badge/Status-Alpha-orange)
+![OpenClaw](https://img.shields.io/badge/OpenClaw-Compatible-blue)
+![AI-Native](https://img.shields.io/badge/AI-Native-green)
+![License](https://img.shields.io/badge/License-MIT-purple)
+
 > **AIMP (AI Meeting Protocol)** is a minimalist AI Agent meeting negotiation protocol.
 > Three Agents, representing three individuals, negotiate a meeting via email and reach a consensus.
 > **Fallback Compatibility**: If the recipient does not have an Agent, AIMP automatically sends a natural language email and parses the reply using an LLM.

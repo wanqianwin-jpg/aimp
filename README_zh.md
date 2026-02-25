@@ -1,5 +1,10 @@
 # AIMP — AI Meeting Protocol
 
+![Status](https://img.shields.io/badge/Status-Alpha-orange)
+![OpenClaw](https://img.shields.io/badge/OpenClaw-Compatible-blue)
+![AI-Native](https://img.shields.io/badge/AI-Native-green)
+![License](https://img.shields.io/badge/License-MIT-purple)
+
 > **AIMP (AI Meeting Protocol)** 是一个极简的 AI Agent 会议协商协议。
 > 3 个 Agent 分别代表 3 个人，通过邮件协商一次会议，最终达成共识。
 > 支持降级兼容：对方如果没有 Agent，会自动发自然语言邮件并解析回复。
