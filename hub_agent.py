@@ -177,6 +177,8 @@ class AIMPHubAgent(AIMPAgent):
                 "imap_port": hub_cfg.get("imap_port", 993),
                 "smtp_port": hub_cfg.get("smtp_port", 465),
                 "password": hub_cfg.get("password", ""),
+                "auth_type": hub_cfg.get("auth_type", "basic"),
+                "oauth_params": hub_cfg.get("oauth_params", {}),
             },
             # 父类需要 owner，Hub 模式用 admin member 顶替
             "owner": self._get_admin_owner(config),

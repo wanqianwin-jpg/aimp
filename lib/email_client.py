@@ -7,6 +7,8 @@ import email
 import json
 import time
 import logging
+import base64
+import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -52,8 +54,9 @@ def _extract_session_id(subject: str) -> Optional[str]:
 
 
 class EmailClient:
-    def __init__(self, imap_server: str, smtp_server: str, email_addr: str, password: str,
-                 imap_port: int = 993, smtp_port: int = 465, timeout: int = 15):
+    def __init__(self, imap_server: str, smtp_server: str, email_addr: str, password: str = None,
+                 imap_port: int = 993, smtp_port: int = 465, timeout: int = 15,
+                 auth_type: str = "basic", oauth_params: dict = None):
         self.imap_server = imap_server
         self.smtp_server = smtp_server
         self.email_addr = email_addr
@@ -61,6 +64,50 @@ class EmailClient:
         self.imap_port = imap_port
         self.smtp_port = smtp_port
         self.timeout = timeout
+        self.auth_type = auth_type
+        self.oauth_params = oauth_params or {}
+        
+        # OAuth2 token management
+        self.access_token = self.oauth_params.get("access_token")
+        self.token_expiry = self.oauth_params.get("expires_at", 0)
+        self.token_uri = self.oauth_params.get("token_uri", "https://oauth2.googleapis.com/token")
+
+    def _generate_xoauth2_string(self, token: str) -> str:
+        auth_string = f"user={self.email_addr}\x01auth=Bearer {token}\x01\x01"
+        return auth_string
+
+    def _refresh_access_token(self):
+        """刷新 OAuth2 Access Token"""
+        if not self.oauth_params.get("refresh_token"):
+            raise ValueError("No refresh token provided for OAuth2")
+        
+        logger.info("Refreshing OAuth2 access token...")
+        data = {
+            "client_id": self.oauth_params.get("client_id"),
+            "client_secret": self.oauth_params.get("client_secret"),
+            "refresh_token": self.oauth_params.get("refresh_token"),
+            "grant_type": "refresh_token",
+        }
+        
+        try:
+            resp = requests.post(self.token_uri, data=data, timeout=10)
+            resp.raise_for_status()
+            tokens = resp.json()
+            self.access_token = tokens["access_token"]
+            self.token_expiry = time.time() + tokens.get("expires_in", 3600)
+            logger.info("OAuth2 access token refreshed successfully")
+        except Exception as e:
+            logger.error(f"Failed to refresh OAuth2 token: {e}")
+            raise
+
+    def _ensure_valid_token(self):
+        """确保 Access Token 有效，过期则刷新"""
+        if self.auth_type != "oauth2":
+            return
+        
+        # 简单判断：如果没有token或token即将在60秒内过期
+        if not self.access_token or time.time() >= self.token_expiry - 60:
+            self._refresh_access_token()
 
     # ──────────────────────────────────────────────
     # IMAP
@@ -69,7 +116,11 @@ class EmailClient:
     def _imap_connect(self) -> imaplib.IMAP4_SSL:
         try:
             conn = imaplib.IMAP4_SSL(self.imap_server, self.imap_port, timeout=self.timeout)
-            conn.login(self.email_addr, self.password)
+            if self.auth_type == "oauth2":
+                self._ensure_valid_token()
+                conn.authenticate("XOAUTH2", lambda x: self._generate_xoauth2_string(self.access_token))
+            else:
+                conn.login(self.email_addr, self.password)
             return conn
         except imaplib.IMAP4.error as e:
             logger.error(f"IMAP Login failed: {e}")
@@ -178,7 +229,11 @@ class EmailClient:
     def _smtp_connect(self) -> smtplib.SMTP_SSL:
         try:
             conn = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, timeout=self.timeout)
-            conn.login(self.email_addr, self.password)
+            if self.auth_type == "oauth2":
+                self._ensure_valid_token()
+                conn.auth("XOAUTH2", lambda challenge=None: self._generate_xoauth2_string(self.access_token))
+            else:
+                conn.login(self.email_addr, self.password)
             return conn
         except smtplib.SMTPAuthenticationError as e:
             logger.error(f"SMTP Authentication failed: {e}")

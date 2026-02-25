@@ -51,6 +51,8 @@ class AIMPAgent:
             password=self._resolve_password(agent_cfg),
             imap_port=agent_cfg.get("imap_port", 993),
             smtp_port=agent_cfg.get("smtp_port", 465),
+            auth_type=agent_cfg.get("auth_type", "basic"),
+            oauth_params=agent_cfg.get("oauth_params", {}),
         )
 
         # LLM 协商器

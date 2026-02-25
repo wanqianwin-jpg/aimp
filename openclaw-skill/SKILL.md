@@ -64,6 +64,25 @@ python3 {baseDir}/scripts/setup_config.py \
   --mode "standalone"            # or "hub" if user requested
 ```
 
+### 4. Advanced Configuration (OAuth2 Support)
+
+AIMP supports OAuth2 for providers that require it (e.g., Outlook/Gmail without App Passwords). This requires manual configuration editing.
+
+Add the following to `~/.aimp/config.yaml` under the `agent:` section:
+
+```yaml
+agent:
+  # ... existing config ...
+  auth_type: "oauth2"
+  oauth_params:
+    client_id: "YOUR_CLIENT_ID"
+    client_secret: "YOUR_CLIENT_SECRET"
+    refresh_token: "YOUR_REFRESH_TOKEN"
+    token_uri: "https://oauth2.googleapis.com/token"  # or https://login.microsoftonline.com/.../token
+```
+
+**Note**: Obtaining these credentials requires creating an App in the provider's developer console (Google Cloud Console / Azure Portal).
+
 **Common Email Issues (Troubleshooting):**
 - **Outlook/Hotmail/Live**: Microsoft often blocks non-interactive logins. **Strongly recommend switching to QQ/163/Gmail.**
 - **QQ/163**: User must enable SMTP/IMAP in settings and use an **Authorization Code** (not login password).
