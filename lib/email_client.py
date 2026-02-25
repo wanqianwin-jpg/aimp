@@ -53,22 +53,33 @@ def _extract_session_id(subject: str) -> Optional[str]:
 
 class EmailClient:
     def __init__(self, imap_server: str, smtp_server: str, email_addr: str, password: str,
-                 imap_port: int = 993, smtp_port: int = 465):
+                 imap_port: int = 993, smtp_port: int = 465, timeout: int = 15):
         self.imap_server = imap_server
         self.smtp_server = smtp_server
         self.email_addr = email_addr
         self.password = password
         self.imap_port = imap_port
         self.smtp_port = smtp_port
+        self.timeout = timeout
 
     # ──────────────────────────────────────────────
     # IMAP
     # ──────────────────────────────────────────────
 
     def _imap_connect(self) -> imaplib.IMAP4_SSL:
-        conn = imaplib.IMAP4_SSL(self.imap_server, self.imap_port)
-        conn.login(self.email_addr, self.password)
-        return conn
+        try:
+            conn = imaplib.IMAP4_SSL(self.imap_server, self.imap_port, timeout=self.timeout)
+            conn.login(self.email_addr, self.password)
+            return conn
+        except imaplib.IMAP4.error as e:
+            logger.error(f"IMAP Login failed: {e}")
+            raise
+        except TimeoutError:
+            logger.error(f"IMAP Connection timed out to {self.imap_server}")
+            raise
+        except Exception as e:
+            logger.error(f"IMAP Connection error: {e}")
+            raise
 
     def fetch_aimp_emails(self, since_minutes: int = 60) -> list[ParsedEmail]:
         """搜索含 [AIMP: 的未读邮件，返回解析后的列表"""
@@ -165,9 +176,19 @@ class EmailClient:
     # ──────────────────────────────────────────────
 
     def _smtp_connect(self) -> smtplib.SMTP_SSL:
-        conn = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port)
-        conn.login(self.email_addr, self.password)
-        return conn
+        try:
+            conn = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, timeout=self.timeout)
+            conn.login(self.email_addr, self.password)
+            return conn
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"SMTP Authentication failed: {e}")
+            raise
+        except TimeoutError:
+            logger.error(f"SMTP Connection timed out to {self.smtp_server}")
+            raise
+        except Exception as e:
+            logger.error(f"SMTP Connection error: {e}")
+            raise
 
     def send_aimp_email(
         self,
@@ -221,13 +242,19 @@ class EmailClient:
         logger.info(f"已发送人类邮件: {subject} -> {to}")
 
     def _smtp_send(self, to: list[str], msg):
+        conn = None
         try:
             conn = self._smtp_connect()
             conn.sendmail(self.email_addr, to, msg.as_string())
-            conn.quit()
         except Exception as e:
             logger.error(f"SMTP 发送失败: {e}")
             raise
+        finally:
+            if conn:
+                try:
+                    conn.quit()
+                except Exception:
+                    pass
 
 
 def is_aimp_email(parsed: ParsedEmail) -> bool:

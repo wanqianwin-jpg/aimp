@@ -263,16 +263,17 @@ def main():
     parser.add_argument("--interactive", action="store_true", help="运行交互式向导")
     parser.add_argument("--hub", action="store_true", help="直接进入 Hub 模式向导")
     parser.add_argument("--output", default="~/.aimp/config.yaml", help="输出 YAML 路径")
+    parser.add_argument("--mode", choices=["standalone", "hub"], default="standalone", help="配置模式 (非交互模式用)")
 
-    # 独立模式非交互参数
+    # 独立模式/Hub基础参数
     parser.add_argument("--agent-email")
     parser.add_argument("--imap-server", default="imap.gmail.com")
     parser.add_argument("--smtp-server", default="smtp.gmail.com")
     parser.add_argument("--imap-port", type=int, default=993)
     parser.add_argument("--smtp-port", type=int, default=465)
     parser.add_argument("--password", default="")
-    parser.add_argument("--owner-name")
-    parser.add_argument("--owner-email")
+    parser.add_argument("--owner-name", help="Standalone Owner Name 或 Hub Admin Name")
+    parser.add_argument("--owner-email", help="Standalone Owner Email 或 Hub Admin Email")
     parser.add_argument("--preferred-times", default="")
     parser.add_argument("--blocked-times", default="")
     parser.add_argument("--preferred-locations", default="")
@@ -280,11 +281,11 @@ def main():
     parser.add_argument("--llm-provider", default="anthropic")
     parser.add_argument("--llm-model", default="claude-sonnet-4-5-20250514")
     parser.add_argument("--llm-api-key-env", default="ANTHROPIC_API_KEY")
-    parser.add_argument("--llm-base-url", default="", help="本地模型 Base URL（Ollama 等）")
+    parser.add_argument("--llm-base_url", default="", help="本地模型 Base URL（Ollama 等）")
     args = parser.parse_args()
 
     # 决定走哪条路
-    if len(sys.argv) == 1 or args.interactive or args.hub:
+    if args.interactive:
         if args.hub:
             config = interactive_hub_mode()
         else:
@@ -292,9 +293,9 @@ def main():
             print("  1. Hub 模式（推荐）：一个 Agent 服务多人，适合家庭/小团队")
             print("  2. 独立模式：每人一个 Agent，适合个人使用")
             mode_choice = get_input("请选择 (1/2)", "1")
-            config = interactive_hub_mode() if mode_choice != "2" else interactive_standalone_mode()
+            config = interactive_hub_mode() if mode_choice == "1" else interactive_standalone_mode()
     else:
-        # 非交互：构造独立模式 config
+        # 非交互模式
         if not all([args.agent_email, args.owner_name, args.owner_email]):
             parser.error("非交互模式下必须提供: --agent-email, --owner-name, --owner-email")
 
@@ -312,35 +313,64 @@ def main():
                 "has_agent": c.get("has_agent", False),
             }
 
-        config = {
-            "agent": {
-                "name": f"{args.owner_name}'s Assistant",
-                "email": args.agent_email,
-                "imap_server": args.imap_server,
-                "smtp_server": args.smtp_server,
-                "imap_port": args.imap_port,
-                "smtp_port": args.smtp_port,
-                "password": args.password,
-            },
-            "owner": {
-                "name": args.owner_name,
-                "email": args.owner_email,
-            },
-            "preferences": {
-                "preferred_times": split_list(args.preferred_times),
-                "blocked_times": split_list(args.blocked_times),
-                "preferred_locations": split_list(args.preferred_locations),
-                "auto_accept": True,
-            },
-            "contacts": contacts_dict,
-            "llm": {
-                "provider": args.llm_provider,
-                "model": args.llm_model,
-                "api_key_env": args.llm_api_key_env,
-            },
+        agent_config = {
+            "name": f"{args.owner_name}'s Assistant",
+            "email": args.agent_email,
+            "imap_server": args.imap_server,
+            "smtp_server": args.smtp_server,
+            "imap_port": args.imap_port,
+            "smtp_port": args.smtp_port,
+            "password": args.password,
+        }
+        
+        llm_config = {
+            "provider": args.llm_provider,
+            "model": args.llm_model,
+            "api_key_env": args.llm_api_key_env,
         }
         if args.llm_base_url:
-            config["llm"]["base_url"] = args.llm_base_url
+            llm_config["base_url"] = args.llm_base_url
+
+        if args.mode == "hub":
+            # Hub 模式：将 owner 参数作为第一个管理员成员
+            config = {
+                "mode": "hub",
+                "agent": agent_config,
+                "hub": {
+                    "owners": [
+                        {
+                            "name": args.owner_name,
+                            "email": args.owner_email,
+                            "preferences": {
+                                "preferred_times": split_list(args.preferred_times),
+                                "blocked_times": split_list(args.blocked_times),
+                                "preferred_locations": split_list(args.preferred_locations),
+                                "auto_accept": True,
+                            }
+                        }
+                    ]
+                },
+                "contacts": contacts_dict,
+                "llm": llm_config,
+            }
+        else:
+            # Standalone 模式
+            config = {
+                "mode": "standalone",
+                "agent": agent_config,
+                "owner": {
+                    "name": args.owner_name,
+                    "email": args.owner_email,
+                },
+                "preferences": {
+                    "preferred_times": split_list(args.preferred_times),
+                    "blocked_times": split_list(args.blocked_times),
+                    "preferred_locations": split_list(args.preferred_locations),
+                    "auto_accept": True,
+                },
+                "contacts": contacts_dict,
+                "llm": llm_config,
+            }
 
     # 写文件
     output_path = os.path.expanduser(args.output)

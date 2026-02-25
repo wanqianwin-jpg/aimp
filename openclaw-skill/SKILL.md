@@ -63,6 +63,7 @@ python3 {baseDir}/scripts/setup_config.py \
 - **Outlook/Hotmail/Live**: Microsoft disabled basic auth. User **MUST** enable 2FA and generate an **App Password**.
 - **QQ/163**: User must enable SMTP/IMAP in settings and use an **Authorization Code** (not login password).
 - **Gmail**: User must enable 2FA and generate an **App Password**.
+- **Timeouts**: If connection times out, verify IMAP/SMTP server addresses and ensure user is not behind a firewall blocking port 993/465.
 - If `setup_config.py` fails with auth error, explain this to the user and ask them to generate an App Password.
 
 **If Hub Mode**: You may need to edit `~/.aimp/config.yaml` manually after generation to add more members under `hub: owners: [...]`.
