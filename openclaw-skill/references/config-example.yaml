@@ -1,0 +1,42 @@
+# AIMP Agent 配置示例
+# 复制此文件到 ~/.aimp/config.yaml 并填写真实信息
+
+agent:
+  name: "Alice's Assistant"
+  email: "alice-agent@gmail.com"        # Agent 专用邮箱
+  imap_server: "imap.gmail.com"
+  smtp_server: "smtp.gmail.com"
+  imap_port: 993
+  smtp_port: 465
+  password: "$AGENT_A_PASSWORD"          # 用 $VAR 引用环境变量，或直接填密码
+
+owner:
+  name: "Alice"
+  email: "alice@gmail.com"               # 你的个人邮箱
+
+preferences:
+  preferred_times:
+    - "2026-03-01T10:00"
+    - "2026-03-02T14:00"
+  blocked_times:
+    - "2026-03-03"
+    - "Friday afternoons"
+  preferred_locations:
+    - "Zoom"
+    - "腾讯会议"
+  auto_accept: true
+
+contacts:
+  Bob:
+    agent_email: "bob-agent@gmail.com"   # Bob 的 Agent 邮箱（如果有）
+    human_email: "bob@gmail.com"          # Bob 的个人邮箱（降级用）
+    has_agent: true                       # 设为 false 则发自然语言邮件
+  Carol:
+    agent_email: "carol-agent@gmail.com"
+    human_email: "carol@gmail.com"
+    has_agent: true
+
+llm:
+  provider: "anthropic"                   # 或 "openai"
+  model: "claude-sonnet-4-5-20250514"
+  api_key_env: "ANTHROPIC_API_KEY"        # API key 环境变量名
