@@ -39,10 +39,15 @@ Ask: "Do you want to set this up for just yourself (Standalone) or for a team/fa
 ### 2. Ask for Agent Email Credentials
 Ask: "I need an email address for the AI Agent to send/receive messages.
 Please provide:
-1. Email Address (e.g., ai-agent@outlook.com, @gmail.com, @qq.com)
-2. Password (App Password recommended for Gmail/Outlook/QQ)"
+1. Email Address (e.g., ai-agent@qq.com, @163.com, @gmail.com)
+2. Password (Authorization Code / App Password)"
 
-**Note**: AIMP supports any IMAP/SMTP provider (Outlook, Gmail, QQ, 163, etc.). Do not force Gmail.
+**Recommendation**:
+- **QQ / 163 Email** (Recommended for CN users): Stable and easy to set up. Use "Authorization Code" as password.
+- **Gmail**: Reliable but requires 2FA + App Password.
+- **Outlook/Hotmail**: Often blocks automated logins even with App Password. **Avoid if possible.**
+
+**Note**: AIMP supports any IMAP/SMTP provider.
 
 ### 3. Generate Config (Non-Interactive)
 Once you have the info, run this command (replace placeholders):
@@ -52,19 +57,19 @@ python3 {baseDir}/scripts/setup_config.py \
   --output ~/.aimp/config.yaml \
   --agent-email "AGENT_EMAIL" \
   --password "AGENT_PASSWORD" \
-  --imap-server "IMAP_SERVER" \  # Auto-guess if possible (e.g. imap.gmail.com, outlook.office365.com)
-  --smtp-server "SMTP_SERVER" \  # Auto-guess if possible (e.g. smtp.gmail.com, smtp.office365.com)
+  --imap-server "IMAP_SERVER" \  # Auto-guess: imap.qq.com, imap.163.com, imap.gmail.com
+  --smtp-server "SMTP_SERVER" \  # Auto-guess: smtp.qq.com, smtp.163.com, smtp.gmail.com
   --owner-name "OWNER_NAME" \
   --owner-email "OWNER_EMAIL" \
   --mode "standalone"            # or "hub" if user requested
 ```
 
 **Common Email Issues (Troubleshooting):**
-- **Outlook/Hotmail/Live**: Microsoft disabled basic auth. User **MUST** enable 2FA and generate an **App Password**.
+- **Outlook/Hotmail/Live**: Microsoft often blocks non-interactive logins. **Strongly recommend switching to QQ/163/Gmail.**
 - **QQ/163**: User must enable SMTP/IMAP in settings and use an **Authorization Code** (not login password).
 - **Gmail**: User must enable 2FA and generate an **App Password**.
 - **Timeouts**: If connection times out, verify IMAP/SMTP server addresses and ensure user is not behind a firewall blocking port 993/465.
-- If `setup_config.py` fails with auth error, explain this to the user and ask them to generate an App Password.
+- If `setup_config.py` fails with auth error, explain this to the user and ask them to generate an App Password or switch providers.
 
 **If Hub Mode**: You may need to edit `~/.aimp/config.yaml` manually after generation to add more members under `hub: owners: [...]`.
 
