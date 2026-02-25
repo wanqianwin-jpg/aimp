@@ -409,7 +409,13 @@ class AIMPAgent:
 
         for name in participant_names:
             if name not in contacts:
-                logger.warning(f"联系人 {name} 不在通讯录中，跳过")
+                # 如果输入的是邮箱地址，直接作为人类参与者处理（无需预先配置联系人）
+                if "@" in name:
+                    participants.append(name)
+                    to_humans.append(name)
+                    logger.info(f"添加临时联系人: {name}")
+                else:
+                    logger.warning(f"联系人 {name} 不在通讯录中，跳过")
                 continue
             contact = contacts[name]
             if contact.get("has_agent"):

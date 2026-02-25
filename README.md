@@ -1,43 +1,64 @@
 # AIMP — AI Meeting Protocol
 
-AI Agent 通过邮件自动协商会议时间和地点，达成共识后通过 IM 通知主人。
+> **AIMP (AI Meeting Protocol)** 是一个极简的 AI Agent 会议协商协议。
+> 3 个 Agent 分别代表 3 个人，通过邮件协商一次会议，最终达成共识。
+> 支持降级兼容：对方如果没有 Agent，会自动发自然语言邮件并解析回复。
 
-支持两种使用方式：
-1. **OpenClaw Skill** — 安装到 OpenClaw，通过 WhatsApp/Telegram/Slack 等 IM 交互
-2. **独立运行** — 3 个 Agent 线程直接跑，邮件通知
+## 🚀 如何使用 (OpenClaw Skill)
 
-## OpenClaw Skill 安装
+本项目设计为 **OpenClaw Skill**，建议通过 OpenClaw 直接使用。
+
+### 1. 安装 Skill
+
+将本仓库作为 Skill 添加到你的 OpenClaw：
 
 ```bash
-# 复制 skill 到 OpenClaw 目录
-cp -r openclaw-skill ~/.openclaw/skills/aimp-meeting
-
-# 设置环境变量
-export ANTHROPIC_API_KEY="sk-ant-..."
-export AIMP_AGENT_EMAIL="your-agent@gmail.com"
-export AIMP_AGENT_PASSWORD="gmail-app-password"
-export AIMP_IMAP_SERVER="imap.gmail.com"
-export AIMP_SMTP_SERVER="smtp.gmail.com"
+# 假设你已经安装了 OpenClaw
+openclaw skill add aimp-meeting ./aimp/openclaw-skill
 ```
 
-然后在 OpenClaw 中对话：
-- "帮我约 Bob 和 Carol 开 Q1 复盘会"
-- "我的会议什么状态了？"
-- Agent 需要你决策时会直接在 IM 里问你
+### 2. 让 OpenClaw 帮你配置
 
-## 独立运行（演示模式）
+在 OpenClaw 中输入：
+> "Help me setup AIMP meeting agent"
 
+OpenClaw 会引导你输入邮箱信息、偏好设置，并自动完成配置。
+
+### 3. 发起会议
+
+直接告诉 OpenClaw：
+> "Schedule a meeting with bob@example.com about Project X review"
+
+OpenClaw 会：
+1.  自动发起邮件协商。
+2.  定期检查回复。
+3.  如果对方是人类，自动解析自然语言回复。
+4.  达成共识后通知你。
+
+-----
+
+## 🛠️ 手动开发与测试
+
+如果你是开发者，想手动运行或调试：
+
+### 1. 安装依赖
 ```bash
 pip install -r requirements.txt
-
-# 编辑 config/ 目录下的 3 个 YAML 配置
-export ANTHROPIC_API_KEY="sk-ant-..."
-export AGENT_A_PASSWORD="..." AGENT_B_PASSWORD="..." AGENT_C_PASSWORD="..."
-
-python run_demo.py
 ```
 
-## 文件结构
+### 2. 生成配置
+```bash
+python3 openclaw-skill/scripts/setup_config.py --interactive
+```
+
+### 3. 运行 Agent
+```bash
+python3 agent.py ~/.aimp/config.yaml --notify stdout
+```
+
+-----
+
+## 一、整体架构
 
 ```
 aimp/

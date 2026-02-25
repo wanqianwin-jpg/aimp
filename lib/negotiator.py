@@ -191,9 +191,10 @@ class Negotiator:
 
 {chr(10).join(options_blocks)}
 
-直接回复这封邮件告诉我就行，比如 "A 和 1" 或者 "周一上午可以，Zoom 开会"。
-
-—— {self.owner_name}'s AI Assistant
+---
+请直接回复这封邮件告诉我就行。
+例如："A 和 1" 或者 "周一上午可以，Zoom 开会"。
+(我是 {self.owner_name} 的 AI 助理，我会自动处理您的回复)
 """
         return body
 
