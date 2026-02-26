@@ -10,48 +10,40 @@ This project and everyone participating in it is governed by the [AIMP Code of C
 
 ### Reporting Bugs
 
-This section guides you through submitting a bug report for AIMP. Following these guidelines helps maintainers and the community understand your report, reproduce the behavior, and find related reports.
+Found a bug? No worries, we're here to help!
 
-- **Use a clear and descriptive title** for the issue to identify the problem.
-- **Describe the exact steps which reproduce the problem** in as many details as possible.
-- **Provide specific examples to demonstrate the steps**. Include copy/pasteable snippets, which you use in those examples.
+- **Give it a clear title** so we know what's up.
+- **Tell us how to reproduce it** step-by-step. The more details, the better!
+- **Show us what happened**. Screenshots or code snippets are super helpful.
 
 ### Suggesting Enhancements
 
-This section guides you through submitting an enhancement suggestion for AIMP, including completely new features and minor improvements to existing functionality.
+Have a cool idea? We'd love to hear it!
 
-- **Use a clear and descriptive title** for the issue to identify the suggestion.
-- **Provide a step-by-step description of the suggested enhancement** in as many details as possible.
-- **Explain why this enhancement would be useful** to most AIMP users.
+- **Title it clearly**.
+- **Describe your idea** in detail.
+- **Tell us why it's awesome** and how it helps everyone.
 
 ### Pull Requests
 
-The process described here has several goals:
+Ready to share your code? Awesome!
 
-- Maintain AIMP's quality
-- Fix problems that are important to users
-- Engage the community in working toward the best possible AIMP
-
-Please follow these steps to have your contribution considered by the maintainers:
-
-1.  Follow all instructions in the template
-2.  Follow the style guides
-3.  After you submit your pull request, verify that all status checks are passing
+1.  **Fork the repo** and create your branch from `main`.
+2.  **Make your changes** (and don't forget the tests!).
+3.  **Submit a Pull Request** to our `main` branch.
 
 ## Styleguides
 
 ### Python Styleguide
 
-- Use [Black](https://github.com/psf/black) for code formatting.
-- Use [Ruff](https://github.com/astral-sh/ruff) for linting.
-- Write docstrings for all public modules, functions, classes, and methods.
+- We love **[Black](https://github.com/psf/black)** for formatting.
+- We use **[Ruff](https://github.com/astral-sh/ruff)** to keep things tidy.
+- Please add docstrings so others know what your code does!
 
 ### Git Commit Messages
 
-- Use the present tense ("Add feature" not "Added feature")
-- Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
-- Limit the first line to 72 characters or less
-- Reference issues and pull requests liberally after the first line
+- Keep it present tense ("Add feature" not "Added feature").
+- Be concise (under 72 chars for the first line).
 
 ## Setting Up Your Development Environment
 

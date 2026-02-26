@@ -16,7 +16,7 @@
 
 ## 📥 Get Source Code
 
-Choose the repository that best suits your location for optimal download speed.
+Grab the code from the location that's fastest for you.
 
 ### Option 1: GitHub (International Recommended)
 - **HTTPS**: `git clone https://github.com/wanqianwin-jpg/aimp.git`
@@ -26,7 +26,7 @@ Choose the repository that best suits your location for optimal download speed.
 - **HTTPS**: `git clone https://gitee.com/wanqianwin/aimp.git`
 - **SSH**: `git clone git@gitee.com:wanqianwin/aimp.git`
 
-> **Note**: If you are in mainland China and experience slow connection to GitHub, please use the **Gitee** mirror.
+> **Note**: If you are in mainland China and experience slow connection to GitHub, the **Gitee** mirror is your best friend.
 
 ## 💻 OS-Specific Instructions
 - **macOS / Linux**: Open Terminal and run the `git clone` command above.
@@ -34,7 +34,7 @@ Choose the repository that best suits your location for optimal download speed.
 
 ## 🚀 How to Use (OpenClaw Skill)
 
-This project is designed as an **OpenClaw Skill**. If you are using **OpenClaw (龙虾人)**, you can simply copy and paste the following prompt to let it handle everything:
+AIMP works seamlessly as an **OpenClaw Skill**. If you are using **OpenClaw (龙虾人)**, simply copy and paste the following prompt to let it handle everything for you:
 
 > **[OpenClaw User? Copy This]**
 > "Please help me install AIMP meeting skill from `https://gitee.com/wanqianwin/aimp` or `https://github.com/wanqianwin-jpg/aimp`. 

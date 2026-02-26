@@ -31,21 +31,21 @@ python3 {baseDir}/scripts/install.py
 Instead, you must **ask the user** for the following information in the chat, then run the script with arguments.
 
 ### 1. Ask User for Mode & Email
-Ask: "Do you want to set this up for just yourself (Standalone) or for a team/family (Hub Mode)?"
+Ask: "Would you like to set this up just for yourself (Standalone Mode) or for your whole team/family (Hub Mode)?"
 
-- **Standalone**: Ask for Owner Name, Owner Email.
-- **Hub Mode**: Ask for Hub Name (e.g., "Family Agent"), Admin Name, Admin Email.
+- **Standalone**: Ask for **Your Name** and **Your Email**.
+- **Hub Mode**: Ask for a **Hub Name** (e.g., "Family Agent"), **Admin Name**, and **Admin Email**.
 
 ### 2. Ask for Agent Email Credentials
-Ask: "I need an email address for the AI Agent to send/receive messages.
-Please provide:
-1. Email Address (e.g., ai-agent@qq.com, @163.com, @gmail.com)
-2. Password (Authorization Code / App Password)"
+Ask: "To get started, I need an email address that I can use to send and receive meeting invites on your behalf.
+Could you please provide:
+1. The **Email Address** (e.g., ai-agent@qq.com, @gmail.com)
+2. The **Password** (or Authorization Code / App Password)"
 
 **Recommendation**:
-- **QQ / 163 Email** (Recommended for CN users): Stable, easy. Use "Authorization Code" as password (not login password).
-- **Gmail**: Reliable. Enable 2FA, then generate an App Password.
-- **Outlook/Hotmail**: ❌ **Basic Auth and App Passwords for IMAP are permanently disabled since October 2022.** Only OAuth2 works, requires Azure App Registration. **Strongly recommend switching to QQ/163/Gmail.**
+- **QQ / 163 Email** (Great for CN users): Use the "Authorization Code".
+- **Gmail**: Use an App Password (requires 2FA).
+- **Outlook/Hotmail**: ⚠️ **Basic Auth is disabled.** Please use OAuth2 or switch to QQ/Gmail for an easier setup.
 
 **Note**: AIMP supports any IMAP/SMTP provider.
 

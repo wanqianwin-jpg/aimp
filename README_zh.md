@@ -16,7 +16,7 @@
 
 ## 🚀 如何使用 (OpenClaw Skill)
 
-本项目设计为 **OpenClaw Skill**。如果您正在使用 **OpenClaw (龙虾人)**，只需复制并粘贴以下指令给它，它将自动处理一切：
+AIMP 完美适配 **OpenClaw (龙虾人)**。如果您正在使用龙虾人，只需复制并粘贴以下指令给它，剩下的交给它处理：
 
 > **[龙虾人用户专用指令]**
 > “请帮我从 `https://gitee.com/wanqianwin/aimp` (国内) 或 `https://github.com/wanqianwin-jpg/aimp` (国际) 安装 AIMP 会议 Skill。
@@ -90,7 +90,7 @@ python3 hub_agent.py ~/.aimp/config.yaml --notify stdout
 
 ## 📥 获取源码 (Download)
 
-请根据您所在的网络环境选择最快的仓库地址。
+请选择最适合您的下载源：
 
 ### 选项 1: Gitee 码云 (国内推荐 - 极速)
 - **HTTPS**: `git clone https://gitee.com/wanqianwin/aimp.git`
@@ -100,11 +100,11 @@ python3 hub_agent.py ~/.aimp/config.yaml --notify stdout
 - **HTTPS**: `git clone https://github.com/wanqianwin-jpg/aimp.git`
 - **SSH**: `git clone git@github.com:wanqianwin-jpg/aimp.git`
 
-> **提示**: 国内用户请优先使用 **Gitee** 镜像，以获得最佳下载体验。
+> **提示**: 如果您在中国大陆，为了更快的下载速度，强烈推荐使用 **Gitee** 镜像。
 
-## 💻 操作系统说明
-- **macOS / Linux**: 打开终端 (Terminal) 运行上述命令。
-- **Windows**: 打开 PowerShell 或 命令提示符 (cmd) 运行命令。
+## 💻 操作系统指南
+- **macOS / Linux**: 打开终端 (Terminal) 并运行上面的 `git clone` 命令。
+- **Windows**: 打开 PowerShell 或命令提示符 (cmd) 并运行命令。
 
 ## 一、整体架构
 
