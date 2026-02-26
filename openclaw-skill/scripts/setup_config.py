@@ -79,35 +79,51 @@ def ask_llm_config():
 
 
 def ask_email_config(label="Agent"):
-    """交互式询问邮箱配置，返回 (email, imap, smtp, password)"""
+    """交互式询问邮箱配置，返回 (email, imap, smtp, imap_port, smtp_port, password)"""
     print(f"\n--- {label} 邮箱配置 ---")
     email = get_input(f"{label} 邮箱地址")
 
     default_imap, default_smtp = "imap.gmail.com", "smtp.gmail.com"
+    default_imap_port, default_smtp_port = 993, 465
+    is_outlook = False
+
     if "@outlook.com" in email or "@hotmail.com" in email or "@live.com" in email:
-        default_imap, default_smtp = "outlook.office365.com", "smtp.office365.com"
-        print("\n[⚠️ Outlook/Hotmail 用户注意]")
-        print("  微软已禁用普通密码登录。你必须：")
-        print("  1. 在微软账户开启双重验证 (2FA)")
-        print("  2. 生成应用专用密码 (App Password)")
-        print("  3. 在 Outlook 网页版设置中启用 POP/IMAP")
-        print("  详情参考: https://support.microsoft.com/en-us/account-billing/using-app-passwords-with-apps-that-don-t-support-two-step-verification-5896ed9b-4263-e681-128a-a6f2979a7944")
+        is_outlook = True
+        # Outlook personal: IMAP=outlook.office365.com:993/SSL, SMTP=smtp-mail.outlook.com:587/STARTTLS
+        default_imap, default_smtp = "outlook.office365.com", "smtp-mail.outlook.com"
+        default_imap_port, default_smtp_port = 993, 587
+        print("\n[❌ Outlook/Hotmail 强烈不推荐]")
+        print("  微软已于2022年10月彻底关闭 IMAP 的 Basic Auth（含 App Password）。")
+        print("  Outlook 个人邮箱现在只支持 OAuth2，配置需要在 Azure 注册应用，流程复杂。")
+        print("  强烈建议改用 QQ/163/Gmail 作为 Agent 专用邮箱，5分钟配好。")
+        print("  如果你坚持用 Outlook，请使用 OAuth2 模式（需手动编辑 config.yaml）。")
     elif "@yahoo.com" in email:
         default_imap, default_smtp = "imap.mail.yahoo.com", "smtp.mail.yahoo.com"
+        default_imap_port, default_smtp_port = 993, 465
     elif "@qq.com" in email:
         default_imap, default_smtp = "imap.qq.com", "smtp.qq.com"
-        print("\n[⚠️ QQ 邮箱用户注意]")
-        print("  QQ 邮箱需要开启 SMTP/IMAP 服务并使用授权码作为密码。")
-    elif "@163.com" in email:
+        default_imap_port, default_smtp_port = 993, 465
+        print("\n[QQ 邮箱用户注意]")
+        print("  需要开启 SMTP/IMAP 服务并使用授权码（非登录密码）作为密码。")
+        print("  开启方法：QQ邮箱网页版 -> 设置 -> 账户 -> POP3/IMAP/SMTP服务 -> 开启")
+    elif "@163.com" in email or "@126.com" in email:
         default_imap, default_smtp = "imap.163.com", "smtp.163.com"
-        print("\n[⚠️ 163 邮箱用户注意]")
-        print("  网易邮箱需要开启 SMTP/IMAP 服务并使用授权码。")
+        default_imap_port, default_smtp_port = 993, 465
+        print("\n[网易邮箱用户注意]")
+        print("  需要开启 SMTP/IMAP 服务并使用授权码。")
+        print("  开启方法：163邮箱 -> 设置 -> POP3/SMTP/IMAP -> 开启服务")
+    elif "@gmail.com" in email:
+        print("\n[Gmail 用户注意]")
+        print("  需要开启两步验证，然后生成应用专用密码 (App Password)。")
+        print("  App Password 生成: Google 账户 -> 安全性 -> 两步验证 -> 应用专用密码")
 
     imap_server = get_input("IMAP 服务器", default_imap)
     smtp_server = get_input("SMTP 服务器", default_smtp)
+    imap_port = int(get_input("IMAP 端口", str(default_imap_port)))
+    smtp_port = int(get_input("SMTP 端口", str(default_smtp_port)))
     password = get_input("邮箱密码 (或应用专用密码，留空跳过)", "", allow_empty=True)
 
-    return email, imap_server, smtp_server, password
+    return email, imap_server, smtp_server, imap_port, smtp_port, password
 
 
 # ──────────────────────────────────────────────────────
@@ -121,7 +137,7 @@ def interactive_hub_mode():
     print("成员之间开会时，Hub 直接读取所有人偏好并自动协调（无需邮件往返）。\n")
 
     hub_name = get_input("Hub 名称 (如'家庭助理'或'团队助理')", "Family Hub")
-    hub_email, imap_server, smtp_server, password = ask_email_config("Hub Agent")
+    hub_email, imap_server, smtp_server, imap_port, smtp_port, password = ask_email_config("Hub Agent")
 
     provider, model, api_key_env, base_url = ask_llm_config()
 
@@ -182,8 +198,8 @@ def interactive_hub_mode():
             "email": hub_email,
             "imap_server": imap_server,
             "smtp_server": smtp_server,
-            "imap_port": 993,
-            "smtp_port": 465,
+            "imap_port": imap_port,
+            "smtp_port": smtp_port,
             "password": password,
         },
         "members": members,
@@ -212,7 +228,7 @@ def interactive_standalone_mode():
     owner_name = get_input("您的姓名 (Owner Name)", "User")
     owner_email = get_input("您的个人邮箱 (用于接收通知)")
 
-    agent_email, imap_server, smtp_server, password = ask_email_config("Agent")
+    agent_email, imap_server, smtp_server, imap_port, smtp_port, password = ask_email_config("Agent")
 
     print("\n--- 会议偏好 ---")
     preferred_times = get_input("偏好时间 (逗号分隔)", "Mon 10:00, Tue 14:00")
@@ -227,8 +243,8 @@ def interactive_standalone_mode():
             "email": agent_email,
             "imap_server": imap_server,
             "smtp_server": smtp_server,
-            "imap_port": 993,
-            "smtp_port": 465,
+            "imap_port": imap_port,
+            "smtp_port": smtp_port,
             "password": password,
         },
         "owner": {

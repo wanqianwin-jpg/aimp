@@ -1,16 +1,16 @@
 """
-hub_agent.py — AIMP Hub 模式
+hub_agent.py — AIMP Hub Mode / AIMP Hub 模式
 
-一个 Hub 实例服务多个 Human（members）。
+A Hub instance serves multiple Humans (members). / 一个 Hub 实例服务多个 Human（members）。
 
-核心优势：
-  - 身份识别：通过发件人邮箱白名单自动识别是哪个 member 在发指令
-  - 上帝视角：Hub 内部成员之间开会，直接读取所有人偏好，1 次 LLM 调用出结果，无需邮件协商
-  - 对外透明：Hub 与外部人/外部 Agent 之间仍走标准 AIMP 邮件协商
+Key advantages / 核心优势：
+  - Identity Recognition: Automatically identifies which member is sending commands via a whitelist of sender emails / 身份识别：通过发件人邮箱白名单自动识别是哪个 member 在发指令
+  - God's View: Meetings between Hub members read everyone's preferences directly, results in 1 LLM call, no email negotiation needed / 上帝视角：Hub 内部成员之间开会，直接读取所有人偏好，1 次 LLM 调用出结果，无需邮件协商
+  - External Transparency: Hub still follows standard AIMP email negotiation with external people/agents / 对外透明：Hub 与外部人/外部 Agent 之间仍走标准 AIMP 邮件协商
 
-配置格式（两种，自动检测）：
-  hub 模式：顶层有 "mode: hub" 或者顶层有 "hub:" + "members:" 字段
-  standalone 模式：顶层有 "owner:" 字段 → 退化为标准 AIMPAgent
+Configuration format (two types, auto-detected) / 配置格式（两种，自动检测）：
+  hub mode: Top level has "mode: hub" or "hub:" + "members:" fields / hub 模式：顶层有 "mode: hub" 或者顶层有 "hub:" + "members:" 字段
+  standalone mode: Top level has "owner:" field -> degrades to standard AIMPAgent / standalone 模式：顶层有 "owner:" 字段 → 退化为标准 AIMPAgent
 """
 from __future__ import annotations
 import logging
@@ -38,12 +38,13 @@ def load_yaml(path: str) -> dict:
 
 
 # ──────────────────────────────────────────────────────
-# Hub Negotiator：支持多用户偏好汇总
+# Hub Negotiator: Supports multi-user preference aggregation / 支持多用户偏好汇总
 # ──────────────────────────────────────────────────────
 
 class HubNegotiator:
     """
-    扩展版 Negotiator，支持"上帝视角"——
+    Extended Negotiator supporting "God's View" — / 扩展版 Negotiator，支持"上帝视角"——
+    One LLM call aggregates all members' preferences to find the optimal intersection. /
     一次 LLM 调用汇总所有 members 的偏好，直接找出最优交集。
     """
     def __init__(self, hub_name: str, hub_email: str, llm_config: dict):
@@ -57,67 +58,68 @@ class HubNegotiator:
         member_prefs: dict[str, dict],
     ) -> dict:
         """
+        Aggregate all participant preferences and find the optimal time/location. /
         汇总所有参与者偏好，找出最优时间/地点。
 
         Args:
-            topic: 会议主题
+            topic: Meeting topic / 会议主题
             member_prefs: {member_id: {"name":..., "preferred_times":..., "blocked_times":..., "preferred_locations":...}}
 
         Returns:
             {
               "consensus": True/False,
-              "time": "...",          # 如果有共识
-              "location": "...",      # 如果有共识
-              "options": {"time": [...], "location": [...]},  # 候选列表
+              "time": "...",          # If consensus reached / 如果有共识
+              "location": "...",      # If consensus reached / 如果有共识
+              "options": {"time": [...], "location": [...]},  # Candidates / 候选列表
               "reason": "...",
             }
         """
         prefs_desc = []
         for mid, p in member_prefs.items():
             prefs_desc.append(
-                f"- {p.get('name', mid)}：偏好时间={p.get('preferred_times', [])}, "
-                f"屏蔽时间={p.get('blocked_times', [])}, 偏好地点={p.get('preferred_locations', [])}"
+                f"- {p.get('name', mid)}: Preferred Times={p.get('preferred_times', [])}, "
+                f"Blocked Times={p.get('blocked_times', [])}, Preferred Locations={p.get('preferred_locations', [])}"
             )
 
         system = (
-            f"你是 {self.hub_name} 的智能会议助理，你同时管理多名成员。"
-            "你的任务是找出所有人都能接受的最优会议时间和地点。"
+            f"You are the smart meeting assistant for {self.hub_name}, managing multiple members simultaneously. "
+            "Your task is to find the optimal meeting time and location acceptable to everyone."
         )
-        user = f"""会议主题：{topic}
+        user = f"""Meeting Topic: {topic}
 
-所有参与者的偏好如下：
+Preferences of all participants:
 {chr(10).join(prefs_desc)}
 
-请帮所有人找出最优的会议时间和地点，严格返回以下 JSON（不要多余文字）：
+Please help find the optimal meeting time and location for everyone. Strictly return the following JSON (no extra text):
 {{
-  "consensus": true 或 false,
-  "time": "推荐时间（如果有共识）或 null",
-  "location": "推荐地点（如果有共识）或 null",
+  "consensus": true or false,
+  "time": "Recommended time (if consensus) or null",
+  "location": "Recommended location (if consensus) or null",
   "options": {{
-    "time": ["候选时间1", "候选时间2"],
-    "location": ["候选地点1", "候选地点2"]
+    "time": ["candidate time 1", "candidate time 2"],
+    "location": ["candidate location 1", "candidate location 2"]
   }},
-  "reason": "简短说明（中文）"
+  "reason": "Short explanation (in Chinese)"
 }}
 
-规则：
-- 如果能找到所有人都接受的时间和地点，consensus=true，填入 time 和 location。
-- 如果存在冲突，consensus=false，在 options 中提供候选方案，time/location 为 null。
-- 严禁安排在任何人的屏蔽时间。
+Rules:
+- If an acceptable time and location can be found for everyone, consensus=true, fill in time and location.
+- If there is a conflict, consensus=false, provide options in the options field, and set time/location to null.
+- Strictly forbidden to schedule during anyone's blocked times.
 """
         try:
             raw = call_llm(self.client, self.model, self.provider, system, user)
             result = extract_json(raw)
-            logger.debug(f"HubNegotiator.find_optimal_slot 结果: {result}")
+            logger.debug(f"HubNegotiator.find_optimal_slot result: {result}")
             return result
         except Exception as e:
-            logger.error(f"Hub LLM 调度失败: {e}")
+            logger.error(f"Hub LLM scheduling failed: {e} / Hub LLM 调度失败: {e}")
             return {
                 "consensus": False,
                 "time": None,
                 "location": None,
                 "options": {"time": [], "location": []},
-                "reason": f"LLM 调用失败: {e}",
+                "reason": f"LLM call failed: {e} / LLM 调用失败: {e}",
             }
 
     def generate_member_notify_body(
@@ -422,7 +424,7 @@ class AIMPHubAgent(AIMPAgent):
         # 覆写父类 negotiator 的偏好（父类 _send_reply 等会用到）
         self.negotiator.preferences = combined_prefs
 
-        # 调用父类标准逻辑（向外部联系人发 AIMP/人类邮件）
+        # Call standard parent logic (email AIMP/humans) / 调用父类标准逻辑（向外部联系人发 AIMP/人类邮件）
         session_id = super().initiate_meeting(topic, external_names)
 
         # 记录这个 session 的内部参与者（用于后续确认后通知）
@@ -496,27 +498,28 @@ class AIMPHubAgent(AIMPAgent):
                 )
                 logger.info(f"已通知 member {mid} ({member_email})")
 
-    # ── 收到 member 邮件指令 ──────────────────────────
+    # ── Received member email command / 收到 member 邮件指令 ──────────────────────────
 
     def handle_member_command(self, from_email: str, body: str) -> list[dict]:
         """
+        Process commands sent by members via email (e.g., "help me book a meeting with Bob tomorrow"). /
         处理 member 通过邮件发来的指令（如"帮我约 Bob 明天开会"）。
-        先识别身份，再决策动作。
+        Identify identity first, then decide on actions. / 先识别身份，再决策动作。
         """
         member_id = self.identify_sender(from_email)
         if not member_id:
-            logger.warning(f"陌生发件人 {from_email}，拒绝服务")
+            logger.warning(f"Unknown sender {from_email}, service refused / 陌生发件人 {from_email}，拒绝服务")
             if self.notify_mode == "email":
                 self.email_client.send_human_email(
                     to=from_email,
-                    subject="无权使用此服务",
-                    body=f"抱歉，{from_email} 未在白名单中，无法使用本会议助手服务。",
+                    subject="Access Denied / 无权使用此服务",
+                    body=f"Sorry, {from_email} is not in the whitelist and cannot use this meeting assistant service. / 抱歉，{from_email} 未在白名单中，无法使用本会议助手服务。",
                 )
             return [{"type": "rejected", "from": from_email, "reason": "not_in_whitelist"}]
 
-        logger.info(f"识别到 member: {member_id} ({from_email})")
-        # 此处可以进一步用 LLM 解析 body，提取 topic 和 participants
-        # 目前作为 escalation 事件返回，由 OpenClaw 处理
+        logger.info(f"Identified member: {member_id} ({from_email}) / 识别到 member: {member_id} ({from_email})")
+        # LLM can be used here to parse the body and extract topic/participants / 此处可以进一步用 LLM 解析 body，提取 topic 和 participants
+        # Currently returned as an escalation event for processing by OpenClaw / 目前作为 escalation 事件返回，由 OpenClaw 处理
         return [{
             "type": "member_command",
             "member_id": member_id,
@@ -524,10 +527,10 @@ class AIMPHubAgent(AIMPAgent):
             "body": body,
         }]
 
-    # ── 覆写通知主人（通知所有 admin members） ─────────
+    # ── Override Notify Owner (Notify all admin members) / 覆写通知主人（通知所有 admin members） ─────────
 
     def _notify_owner_confirmed(self, session: AIMPSession):
-        """通知所有 admin members（或所有 members）"""
+        """Notify all admin members (or all members) / 通知所有 admin members（或所有 members）"""
         consensus = session.check_consensus()
 
         admin_ids = [
@@ -537,7 +540,7 @@ class AIMPHubAgent(AIMPAgent):
         if not admin_ids:
             admin_ids = list(self.members.keys())
 
-        # 尝试从 session 附带的 hub 内部信息恢复参与者
+        # Try to restore participants from hub internal info attached to session / 尝试从 session 附带的 hub 内部信息恢复参与者
         internal_member_ids = self._load_internal_members(session.session_id)
         notify_ids = internal_member_ids if internal_member_ids else admin_ids
 
@@ -551,14 +554,14 @@ class AIMPHubAgent(AIMPAgent):
             )
         else:
             lines = [
-                "好消息！会议已成功协商确定。",
+                "Great news! The meeting has been successfully negotiated and confirmed. / 好消息！会议已成功协商确定。",
                 "",
-                f"主题：{session.topic}",
+                f"Topic: {session.topic} / 主题：{session.topic}",
             ]
             for item, val in consensus.items():
                 if val:
-                    lines.append(f"{item}：{val}")
-            lines.append(f"\n协商经过 {session.round_count()} 轮完成。")
+                    lines.append(f"{item}: {val} / {item}：{val}")
+            lines.append(f"\nNegotiation completed in {session.round_count()} rounds. / 协商经过 {session.round_count()} 轮完成。")
             body = "\n".join(lines)
 
             self._notify_members(
@@ -569,7 +572,7 @@ class AIMPHubAgent(AIMPAgent):
             )
 
     def _load_internal_members(self, session_id: str) -> list[str]:
-        """从 store 中恢复 hub 内部成员列表"""
+        """Restore internal Hub member list from store / 从 store 中恢复 hub 内部成员列表"""
         refs = self.store.load_message_ids(session_id)
         for ref in refs:
             if ref.startswith("__hub_internal_members__"):
@@ -579,27 +582,28 @@ class AIMPHubAgent(AIMPAgent):
 
 
 # ──────────────────────────────────────────────────────
+# Factory Function: Automatically returns correct Agent type based on config /
 # 工厂函数：根据 config 自动返回正确的 Agent 类型
 # ──────────────────────────────────────────────────────
 
 def create_agent(config_path: str, notify_mode: str = "email", db_path: str = None):
     """
-    根据配置文件自动选择 Agent 类型：
-      - 有 "hub:" + "members:" → AIMPHubAgent（Hub 模式）
-      - 有 "owner:" → AIMPAgent（独立模式，向后兼容）
+    Automatically select Agent type based on configuration file: / 根据配置文件自动选择 Agent 类型：
+      - Has "hub:" + "members:" -> AIMPHubAgent (Hub mode) / 有 "hub:" + "members:" → AIMPHubAgent（Hub 模式）
+      - Has "owner:" -> AIMPAgent (Standalone mode, backward compatible) / 有 "owner:" → AIMPAgent（独立模式，向后兼容）
     """
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     if "members" in cfg or (cfg.get("mode") == "hub"):
-        logger.info("检测到 Hub 模式配置，使用 AIMPHubAgent")
+        logger.info("Hub mode configuration detected, using AIMPHubAgent / 检测到 Hub 模式配置，使用 AIMPHubAgent")
         return AIMPHubAgent(config_path, notify_mode=notify_mode, db_path=db_path)
     else:
-        logger.info("检测到独立模式配置，使用 AIMPAgent")
+        logger.info("Standalone mode configuration detected, using AIMPAgent / 检测到独立模式配置，使用 AIMPAgent")
         return AIMPAgent(config_path, notify_mode=notify_mode, db_path=db_path)
 
 
-# ── 入口（独立运行 Hub Agent）──────────────────────────
+# ── Entry Point (Run Hub Agent standalone) / 入口（独立运行 Hub Agent）──────────────────────────
 
 def main():
     logging.basicConfig(
@@ -608,6 +612,7 @@ def main():
         stream=sys.stdout,
     )
     if len(sys.argv) < 2:
+        print("Usage: python hub_agent.py <config_path> [poll_interval] [--notify stdout|email]")
         print("用法: python hub_agent.py <config_path> [poll_interval] [--notify stdout|email]")
         sys.exit(1)
 

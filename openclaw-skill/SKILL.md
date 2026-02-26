@@ -43,9 +43,9 @@ Please provide:
 2. Password (Authorization Code / App Password)"
 
 **Recommendation**:
-- **QQ / 163 Email** (Recommended for CN users): Stable and easy to set up. Use "Authorization Code" as password.
-- **Gmail**: Reliable but requires 2FA + App Password.
-- **Outlook/Hotmail**: Often blocks automated logins even with App Password. **Avoid if possible.**
+- **QQ / 163 Email** (Recommended for CN users): Stable, easy. Use "Authorization Code" as password (not login password).
+- **Gmail**: Reliable. Enable 2FA, then generate an App Password.
+- **Outlook/Hotmail**: ❌ **Basic Auth and App Passwords for IMAP are permanently disabled since October 2022.** Only OAuth2 works, requires Azure App Registration. **Strongly recommend switching to QQ/163/Gmail.**
 
 **Note**: AIMP supports any IMAP/SMTP provider.
 
@@ -57,40 +57,66 @@ python3 {baseDir}/scripts/setup_config.py \
   --output ~/.aimp/config.yaml \
   --agent-email "AGENT_EMAIL" \
   --password "AGENT_PASSWORD" \
-  --imap-server "IMAP_SERVER" \  # Auto-guess: imap.qq.com, imap.163.com, imap.gmail.com
-  --smtp-server "SMTP_SERVER" \  # Auto-guess: smtp.qq.com, smtp.163.com, smtp.gmail.com
+  --imap-server "IMAP_SERVER" \
+  --smtp-server "SMTP_SERVER" \
+  --imap-port 993 \
+  --smtp-port 465 \
   --owner-name "OWNER_NAME" \
   --owner-email "OWNER_EMAIL" \
   --mode "standalone"            # or "hub" if user requested
 ```
 
+**Server quick reference**:
+| Provider | IMAP | SMTP | IMAP Port | SMTP Port |
+|---|---|---|---|---|
+| Gmail | imap.gmail.com | smtp.gmail.com | 993 | 465 |
+| QQ | imap.qq.com | smtp.qq.com | 993 | 465 |
+| 163/126 | imap.163.com | smtp.163.com | 993 | 465 |
+| Outlook personal | outlook.office365.com | smtp-mail.outlook.com | 993 | **587** |
+| Office 365 biz | outlook.office365.com | smtp.office365.com | 993 | **587** |
+
+Note: Outlook uses port **587 + STARTTLS**, not 465. AIMP auto-detects this from the port number.
+
 ### 4. Advanced Configuration (OAuth2 Support)
 
-AIMP supports OAuth2 for providers that require it (e.g., Outlook/Gmail without App Passwords). This requires manual configuration editing.
+AIMP supports OAuth2 for providers that require it. This requires manual configuration editing.
 
-Add the following to `~/.aimp/config.yaml` under the `agent:` section:
-
+**For Gmail OAuth2** (if App Password is unavailable):
 ```yaml
 agent:
-  # ... existing config ...
   auth_type: "oauth2"
   oauth_params:
     client_id: "YOUR_CLIENT_ID"
     client_secret: "YOUR_CLIENT_SECRET"
     refresh_token: "YOUR_REFRESH_TOKEN"
-    token_uri: "https://oauth2.googleapis.com/token"  # or https://login.microsoftonline.com/.../token
+    token_uri: "https://oauth2.googleapis.com/token"
 ```
 
-**Note**: Obtaining these credentials requires creating an App in the provider's developer console (Google Cloud Console / Azure Portal).
+**For Outlook/Microsoft OAuth2** (only option for Outlook):
+```yaml
+agent:
+  imap_server: "outlook.office365.com"
+  smtp_server: "smtp-mail.outlook.com"   # personal; use smtp.office365.com for M365 business
+  imap_port: 993
+  smtp_port: 587
+  auth_type: "oauth2"
+  oauth_params:
+    client_id: "YOUR_AZURE_APP_CLIENT_ID"
+    client_secret: "YOUR_AZURE_APP_CLIENT_SECRET"
+    refresh_token: "YOUR_REFRESH_TOKEN"
+    token_uri: "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+```
+
+**Note**: For Outlook OAuth2, you must first register an App in Azure Portal (portal.azure.com), grant it `IMAP.AccessAsUser.All` and `SMTP.Send` permissions, and obtain a refresh token via Authorization Code or Device Code flow.
 
 **Common Email Issues (Troubleshooting):**
-- **Outlook/Hotmail/Live**: Microsoft often blocks non-interactive logins. **Strongly recommend switching to QQ/163/Gmail.**
-- **QQ/163**: User must enable SMTP/IMAP in settings and use an **Authorization Code** (not login password).
-- **Gmail**: User must enable 2FA and generate an **App Password**.
-- **Timeouts**: If connection times out, verify IMAP/SMTP server addresses and ensure user is not behind a firewall blocking port 993/465.
-- If `setup_config.py` fails with auth error, explain this to the user and ask them to generate an App Password or switch providers.
+- **Outlook/Hotmail/Live IMAP with App Password**: Permanently broken since Oct 2022. Switch to QQ/163/Gmail, or implement OAuth2.
+- **QQ/163**: Must enable SMTP/IMAP service in webmail settings and use the **Authorization Code** (授权码), not your login password.
+- **Gmail**: Must enable 2FA and generate an **App Password** at myaccount.google.com.
+- **Timeouts on port 465**: Verify your provider supports SSL on 465. If using Outlook, switch to port 587 (STARTTLS is used automatically).
+- **"AUTH LOGIN failed"**: For QQ/163/Gmail — wrong password or App Password not generated. For Outlook — Basic Auth is dead, you need OAuth2.
 
-**If Hub Mode**: You may need to edit `~/.aimp/config.yaml` manually after generation to add more members under `hub: owners: [...]`.
+**If Hub Mode**: Edit `~/.aimp/config.yaml` manually after generation to add more members.
 
 Output: `{"type": "config_created", "path": "...", "mode": "hub|standalone", ...}`
 
