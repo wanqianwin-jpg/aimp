@@ -135,6 +135,9 @@ def interactive_hub_mode():
     print("\n=== AIMP Hub 配置向导 ===\n")
     print("Hub 模式：一个 Agent 邮箱服务多名成员。")
     print("成员之间开会时，Hub 直接读取所有人偏好并自动协调（无需邮件往返）。\n")
+    print("⚠️  重要：Hub 需要一个【专用邮箱】，不能用任何成员的个人邮箱！")
+    print("   建议注册一个新的 QQ/163 邮箱专门给 AI 助理用（如 family-hub@qq.com）。")
+    print("   这是 AI 助理的'工位邮箱'，只用来收发会议协调邮件。\n")
 
     hub_name = get_input("Hub 名称 (如'家庭助理'或'团队助理')", "Family Hub")
     hub_email, imap_server, smtp_server, imap_port, smtp_port, password = ask_email_config("Hub Agent")

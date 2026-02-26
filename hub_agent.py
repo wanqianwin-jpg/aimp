@@ -463,6 +463,36 @@ class AIMPHubAgent(AIMPAgent):
             "auto_accept": True,
         }
 
+    # ── Hub Poll 覆写：额外收取成员指令邮件 ──────────────
+
+    def poll(self):
+        """
+        Hub 版 poll：
+          1. 先调父类 poll() 处理 AIMP 协议邮件（含人类回复，因为 subject 现在有 [AIMP:] 标记）
+          2. 再收取所有未读邮件，处理成员直接发来的指令（非 AIMP 协议邮件）
+        """
+        events = super().poll()
+
+        # 收取非 AIMP 邮件（成员指令等）
+        try:
+            all_emails = self.email_client.fetch_all_unread_emails(since_minutes=60)
+            for parsed in all_emails:
+                # 跳过自己发的
+                if parsed.sender == self.agent_email:
+                    continue
+                # 已经有 [AIMP:] 的邮件在父类 poll 里处理过了（已标记已读），这里不会重复
+                # 检查是否是 Hub 成员
+                member_id = self.identify_sender(parsed.sender)
+                if member_id:
+                    evts = self.handle_member_command(parsed.sender, parsed.body)
+                    events.extend(evts)
+                else:
+                    logger.debug(f"Ignoring email from unknown sender: {parsed.sender}")
+        except Exception as e:
+            logger.error(f"Hub member email fetch failed: {e}", exc_info=True)
+
+        return events
+
     # ── 通知 members ──────────────────────────────────
 
     def _notify_members(
@@ -493,7 +523,7 @@ class AIMPHubAgent(AIMPAgent):
                     continue
                 self.email_client.send_human_email(
                     to=member_email,
-                    subject=f"[{self.hub_name}] 会议通知：{topic}",
+                    subject=f"[AIMP:{session_id}] [{self.hub_name}] {topic}",
                     body=body,
                 )
                 logger.info(f"已通知 member {mid} ({member_email})")

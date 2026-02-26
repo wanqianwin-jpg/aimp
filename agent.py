@@ -340,7 +340,7 @@ Please reply to the relevant participants to confirm the final time and location
 """
             self.email_client.send_human_email(
                 to=owner_email,
-                subject=f"[Decision Required / 需要决策] {session.topic}",
+                subject=f"[AIMP:{session.session_id}] [Decision Required / 需要决策] {session.topic}",
                 body=body,
             )
         logger.info(f"[{session.session_id}] Escalated to owner / 已升级给主人 (mode={self.notify_mode})")
@@ -481,7 +481,7 @@ Please reply to the relevant participants to confirm the final time and location
             body = self.negotiator.generate_human_email_body(session)
             self.email_client.send_human_email(
                 to=human_addr,
-                subject=f"Meeting Invitation: {topic} / 会议邀请：{topic}",
+                subject=f"[AIMP:{session_id}] Meeting Invitation: {topic} / 会议邀请：{topic}",
                 body=body,
             )
             logger.info(f"[{session_id}] Sent fallback email to human: {human_addr} / 已发降级邮件给人类: {human_addr}")

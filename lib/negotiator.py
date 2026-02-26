@@ -208,14 +208,26 @@ Please extract the user's choices and return strictly as JSON (no extra text): /
 
         body = f"""Hi,
 
-{self.owner_name} would like to invite you to: / {self.owner_name} 想邀请你参加：{session.topic}
+{self.owner_name} would like to invite you to a meeting: {session.topic}
+{self.owner_name} 想邀请你参加一个会议：{session.topic}
 
 {chr(10).join(options_blocks)}
 
 ---
-Please reply directly to this email to let me know. / 请直接回复这封邮件告诉我就行。
-Example: "A and 1" or "Monday morning works, Zoom meeting." / 例如："A 和 1" 或者 "周一上午可以，Zoom 开会"。
-(I am {self.owner_name}'s AI assistant, I will automatically process your reply / 我是 {self.owner_name} 的 AI 助理，我会自动处理您的回复)
+How to reply / 如何回复：
+
+Just reply to this email in natural language. Examples:
+直接回复这封邮件即可，用自然语言就行。举例：
+
+  "Tuesday 10am works, Zoom is fine."
+  "周二上午可以，Zoom 开会。"
+  "A and 1"
+
+I am {self.owner_name}'s AI meeting assistant. I will read your reply and coordinate automatically.
+我是 {self.owner_name} 的 AI 会议助手，我会自动读取你的回复并协调。
+
+If you also have an AI assistant, it can reply on your behalf using the AIMP protocol (attach protocol.json).
+如果你也有 AI 助手，它可以用 AIMP 协议代你回复（附带 protocol.json）。
 """
         return body
 

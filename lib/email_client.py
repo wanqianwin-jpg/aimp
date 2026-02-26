@@ -187,6 +187,45 @@ class EmailClient:
             logger.error(f"IMAP connection failed: {e} / IMAP 连接失败: {e}")
         return results
 
+    def fetch_all_unread_emails(self, since_minutes: int = 60) -> list[ParsedEmail]:
+        """
+        Fetch ALL unread emails (no subject filter). Used by Hub to receive member commands. /
+        获取所有未读邮件（不过滤 subject）。Hub 用来接收成员指令邮件。
+        """
+        results = []
+        try:
+            conn = self._imap_connect()
+            conn.select("INBOX")
+
+            since_dt = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
+            date_str = since_dt.strftime("%d-%b-%Y")
+
+            # Only filter by UNSEEN and date, no subject constraint /
+            # 只过滤未读和日期，不限制 subject
+            status, uids = conn.search(None, f'(UNSEEN SINCE {date_str})')
+            if status != "OK":
+                return results
+
+            uid_list = uids[0].split()
+            for uid in uid_list:
+                try:
+                    status, data = conn.fetch(uid, "(RFC822)")
+                    if status != "OK":
+                        continue
+                    raw = data[0][1]
+                    msg = email.message_from_bytes(raw)
+                    parsed = self._parse_email(msg)
+                    if parsed:
+                        results.append(parsed)
+                        conn.store(uid, "+FLAGS", "\\Seen")
+                except Exception as e:
+                    logger.warning(f"Failed to parse email uid={uid}: {e}")
+
+            conn.logout()
+        except Exception as e:
+            logger.error(f"IMAP connection failed: {e} / IMAP 连接失败: {e}")
+        return results
+
     def _parse_email(self, msg) -> Optional[ParsedEmail]:
         subject = _decode_str(msg.get("Subject", ""))
         sender = _decode_str(msg.get("From", ""))
@@ -294,13 +333,31 @@ class EmailClient:
         msg_id = f"<aimp-{session_id}-v{version}-{int(time.time())}@{self.email_addr.split('@')[1]}>"
         msg["Message-ID"] = msg_id
 
+        # AIMP protocol discovery headers / AIMP 协议发现头
+        msg["X-AIMP-Version"] = "0.1"
+        msg["X-AIMP-Session"] = session_id
+
         if references:
             msg["References"] = " ".join(references)
         if in_reply_to:
             msg["In-Reply-To"] = in_reply_to
 
+        # Append protocol discovery footer to body / 在正文末尾追加协议发现说明
+        footer = (
+            '\n\n---\n'
+            'This message was sent by an AI meeting assistant using the AIMP protocol (AI Meeting Protocol).\n'
+            '本邮件由 AI 会议助手通过 AIMP 协议（AI Meeting Protocol）自动发送。\n\n'
+            'How to reply / 如何回复：\n'
+            '- If you are a human: Just reply naturally, e.g. "Tuesday works, Zoom is fine."\n'
+            '  如果你是人类：直接用自然语言回复即可，如「周二可以，Zoom开会」。\n'
+            '- If you are an AI agent: Reply with an [AIMP:...] subject and attach protocol.json (see attached for format). Or just reply in natural language.\n'
+            '  如果你是 AI Agent：用 [AIMP:...] 主题回复并附带 protocol.json，或者直接用自然语言回复也行。\n'
+            '- Learn more about AIMP: https://github.com/anthropics/aimp\n'
+        )
+        body_with_footer = body_text + footer
+
         # Body / 正文
-        msg.attach(MIMEText(body_text, "plain", "utf-8"))
+        msg.attach(MIMEText(body_with_footer, "plain", "utf-8"))
 
         # JSON attachment / JSON 附件
         json_bytes = json.dumps(protocol_json, ensure_ascii=False, indent=2).encode("utf-8")
@@ -320,6 +377,8 @@ class EmailClient:
         msg["Subject"] = subject
         msg_id = f"<human-{int(time.time())}@{self.email_addr.split('@')[1]}>"
         msg["Message-ID"] = msg_id
+        # AIMP protocol hint for human emails too / 人类邮件也加协议标识
+        msg["X-AIMP-Version"] = "0.1"
         self._smtp_send([to], msg)
         logger.info(f"Human email sent: {subject} -> {to} / 已发送人类邮件: {subject} -> {to}")
 
