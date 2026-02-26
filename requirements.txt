@@ -2,53 +2,47 @@ altgraph==0.17.5
 annotated-types==0.7.0
 anthropic==0.84.0
 anyio==4.12.1
-archspec @ file:///home/conda/feedstock_root/build_artifacts/archspec_1737352602016/work
+archspec
 black==26.1.0
-boltons @ file:///home/conda/feedstock_root/build_artifacts/boltons_1749686179973/work
-Brotli @ file:///Users/runner/miniforge3/conda-bld/brotli-split_1764017116075/work
+boltons
+Brotli
 c2pa-python==0.28.0
-certifi @ file:///home/conda/feedstock_root/build_artifacts/certifi_1762976168352/work/certifi
-cffi @ file:///Users/runner/miniforge3/conda-bld/cffi_1761202952988/work
-charset-normalizer @ file:///home/conda/feedstock_root/build_artifacts/charset-normalizer_1760437218288/work
+certifi
+cffi
+charset-normalizer
 click==8.3.1
-colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1733218098505/work
-conda @ file:///Users/runner/miniforge3/conda-bld/conda_1764077554327/work/conda-src
-conda-libmamba-solver @ file:///home/conda/feedstock_root/build_artifacts/conda-libmamba-solver_1764081326783/work/src
-conda-package-handling @ file:///home/conda/feedstock_root/build_artifacts/conda-package-handling_1736345463896/work
-conda_package_streaming @ file:///home/conda/feedstock_root/build_artifacts/conda-package-streaming_1751548120229/work
+colorama
 cryptography==46.0.4
-distro @ file:///home/conda/feedstock_root/build_artifacts/distro_1734729835256/work
+distro
 docstring_parser==0.17.0
 et_xmlfile==2.0.0
 ffmpeg-python==0.2.0
 filelock==3.20.3
 flatbuffers==25.12.19
-frozendict @ file:///Users/runner/miniforge3/conda-bld/frozendict_1763082885869/work
+frozendict
 fsspec==2026.2.0
 future==1.0.0
 h11==0.16.0
-h2 @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_h2_1756364871/work
+h2
 hf-xet==1.2.0
-hpack @ file:///home/conda/feedstock_root/build_artifacts/hpack_1737618293087/work
+hpack
 httpcore==1.0.9
 httpx==0.28.1
 huggingface_hub==1.4.1
-hyperframe @ file:///home/conda/feedstock_root/build_artifacts/hyperframe_1737618333194/work
-idna @ file:///home/conda/feedstock_root/build_artifacts/idna_1760286409563/work
+hyperframe
+idna
 iniconfig==2.3.0
 isort==7.0.0
 jiter==0.13.0
-jsonpatch @ file:///home/conda/feedstock_root/build_artifacts/jsonpatch_1733814567314/work
-jsonpointer @ file:///Users/runner/miniforge3/conda-bld/jsonpointer_1756754188614/work
-libmambapy @ file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_libmambapy_1764158592/work/libmambapy
+jsonpatch
+jsonpointer
 librt==0.7.8
 logging==0.4.9.6
 lxml==6.0.2
 macholib==1.16.4
-menuinst @ file:///Users/runner/miniforge3/conda-bld/menuinst_1761299914766/work
 modelscope==1.34.0
 mpmath==1.3.0
-msgpack @ file:///Users/runner/miniforge3/conda-bld/msgpack-python_1762504198966/work
+msgpack
 mypy==1.19.1
 mypy_extensions==1.1.0
 natsort==8.4.0
@@ -56,15 +50,15 @@ numpy==1.26.4
 onnxruntime==1.24.1
 openai==2.20.0
 openpyxl==3.1.5
-packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1745345660/work
+packaging
 pandas==3.0.0
 pathspec==1.0.4
 pillow==12.1.0
-platformdirs @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_platformdirs_1759953252/work
-pluggy @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pluggy_1764896838/work
+platformdirs
+pluggy
 protobuf==6.33.5
-pycosat @ file:///Users/runner/miniforge3/conda-bld/pycosat_1757744682161/work
-pycparser @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pycparser_1733195786/work
+pycosat
+pycparser
 pydantic==2.12.5
 pydantic_core==2.41.5
 Pygments==2.19.2
@@ -74,14 +68,14 @@ pyqtdarktheme==0.1.7
 PySide6==6.10.2
 PySide6_Addons==6.10.2
 PySide6_Essentials==6.10.2
-PySocks @ file:///home/conda/feedstock_root/build_artifacts/pysocks_1733217236728/work
+PySocks
 pytest==9.0.2
 python-dateutil==2.9.0.post0
 pytokens==0.4.1
 PyYAML==6.0.3
-requests @ file:///home/conda/feedstock_root/build_artifacts/requests_1755614211359/work
-ruamel.yaml @ file:///Users/runner/miniforge3/conda-bld/ruamel.yaml_1761160761767/work
-ruamel.yaml.clib @ file:///Users/runner/miniforge3/conda-bld/ruamel.yaml.clib_1760564263846/work
+requests
+ruamel.yaml
+ruamel.yaml.clib
 setuptools==80.9.0
 shellingham==1.5.4
 sherpa-onnx-core==1.12.23
@@ -92,12 +86,12 @@ sniffio==1.3.1
 soundfile==0.13.1
 sympy==1.14.0
 toml==0.10.2
-tqdm @ file:///home/conda/feedstock_root/build_artifacts/tqdm_1735661334605/work
-truststore @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_truststore_1753886790/work
+tqdm
+truststore
 typer-slim==0.21.1
 typing-inspection==0.4.2
 typing_extensions==4.15.0
-urllib3 @ file:///home/conda/feedstock_root/build_artifacts/urllib3_1750271362675/work
+urllib3
 wheel==0.45.1
 xlsxwriter==3.2.9
 zstandard==0.25.0
