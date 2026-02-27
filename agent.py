@@ -14,7 +14,8 @@ from typing import Optional
 
 import yaml
 
-from lib.email_client import EmailClient, ParsedEmail, is_aimp_email, extract_protocol_json
+from lib.email_client import ParsedEmail, is_aimp_email, extract_protocol_json
+from lib.transport import EmailTransport, BaseTransport
 from lib.protocol import AIMPSession
 from lib.negotiator import Negotiator
 from lib.session_store import SessionStore
@@ -43,12 +44,12 @@ class AIMPAgent:
         self.agent_name: str = agent_cfg["name"]
         self.notify_mode: str = notify_mode
 
-        # Email Client / 邮件客户端
+        # Transport / 传输层
         smtp_port = agent_cfg.get("smtp_port", 465)
-        self.email_client = EmailClient(
+        self.transport = EmailTransport(
+            email_addr=agent_cfg["email"],
             imap_server=agent_cfg["imap_server"],
             smtp_server=agent_cfg["smtp_server"],
-            email_addr=agent_cfg["email"],
             password=self._resolve_password(agent_cfg),
             imap_port=agent_cfg.get("imap_port", 993),
             smtp_port=smtp_port,
@@ -95,7 +96,7 @@ class AIMPAgent:
     def poll(self):
         """Execute one poll cycle and return the list of occurred events / 执行一次轮询，返回发生的事件列表"""
         events = []
-        emails = self.email_client.fetch_aimp_emails(since_minutes=60)
+        emails = self.transport.fetch_aimp_emails(since_minutes=60)
         for parsed in emails:
             try:
                 evts = self.handle_email(parsed)
@@ -259,7 +260,7 @@ class AIMPAgent:
         if in_reply_to and in_reply_to not in refs:
             refs.append(in_reply_to)
 
-        msg_id = self.email_client.send_aimp_email(
+        msg_id = self.transport.send_aimp_email(
             to=recipients,
             session_id=session.session_id,
             version=session.version,
@@ -291,7 +292,7 @@ class AIMPAgent:
         if in_reply_to and in_reply_to not in refs:
             refs.append(in_reply_to)
 
-        msg_id = self.email_client.send_aimp_email(
+        msg_id = self.transport.send_aimp_email(
             to=recipients,
             session_id=session.session_id,
             version=session.version,
@@ -338,7 +339,7 @@ Current Negotiation Status / 当前协商状态：
 
 Please reply to the relevant participants to confirm the final time and location. / 请直接回复相关参与者确定最终时间和地点。
 """
-            self.email_client.send_human_email(
+            self.transport.send_human_email(
                 to=owner_email,
                 subject=f"[AIMP:{session.session_id}] [Decision Required / 需要决策] {session.topic}",
                 body=body,
@@ -369,7 +370,7 @@ Please reply to the relevant participants to confirm the final time and location
             lines.append(f"\nNegotiation completed in {session.round_count()} rounds. / 协商经过 {session.round_count()} 轮完成。")
             body = "\n".join(lines)
 
-            self.email_client.send_human_email(
+            self.transport.send_human_email(
                 to=owner_email,
                 subject=f"Meeting Confirmed: {session.topic} / 会议确认：{session.topic}",
                 body=body,
@@ -466,7 +467,7 @@ Please reply to the relevant participants to confirm the final time and location
         protocol_data = session.to_json()
 
         if to_agents:
-            msg_id = self.email_client.send_aimp_email(
+            msg_id = self.transport.send_aimp_email(
                 to=to_agents,
                 session_id=session_id,
                 version=session.version,
@@ -479,7 +480,7 @@ Please reply to the relevant participants to confirm the final time and location
 
         for human_addr in to_humans:
             body = self.negotiator.generate_human_email_body(session)
-            self.email_client.send_human_email(
+            self.transport.send_human_email(
                 to=human_addr,
                 subject=f"[AIMP:{session_id}] Meeting Invitation: {topic} / 会议邀请：{topic}",
                 body=body,

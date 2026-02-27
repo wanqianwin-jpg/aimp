@@ -13,55 +13,51 @@
 > *   **赛博融合**：利用古老的电子邮件网络作为神经网络的突触，无需对方安装任何 App。
 > *   **义体增强**：为你的 Agent 装上“外交官”义体，让它在后台自动与其他 Agent 或人类进行谈判。
 >
-> **Hub 模式**（v0.2 新增）：一个 Agent 服务全家或整个团队。内部成员之间开会，Hub 直接读取所有人偏好，一次 LLM 调用出结果，无需邮件往返。外部联系人仍走标准邮件协商。
+> **Hub 模式**（v0.2.0 新增）：一个 Agent 服务全家或整个团队。内部成员之间开会，Hub 直接读取所有人偏好，一次 LLM 调用出结果，无需邮件往返。外部联系人仍走标准邮件协商。
+>
+> **The Room**（v0.2.0 新增）：带截止日期的异步内容协商。适用于文档、预算和复杂决策。
 >
 > **降级兼容**：对方如果没有 Agent，会自动发自然语言邮件并用 LLM 解析回复。
 
 [English Documentation](README.md)
 
-## 🚀 如何接入义体 (OpenClaw Skill)
+## 🚀 安装为 OpenClaw Skill
 
-AIMP 是 **OpenClaw (龙虾人)** 的完美适配义体。如果您正在使用龙虾人，只需将以下指令植入它的认知：
+### 第 1 步 —— 注册 Skill
 
-> **[龙虾人植入指令]**
-> “请帮我接入 AIMP 会议义体，源地址：`https://gitee.com/wanqianwin/aimp` (国内) 或 `https://github.com/wanqianwin-jpg/aimp` (国际)。
-> 1. 克隆神经突触仓库并运行 `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`。
-> 2. 运行 `python3 openclaw-skill/scripts/setup_config.py --interactive` 帮我配置通讯协议。
-> 3. 义体安装完成后，我们发起一个测试会议！”
-
-### 🐳 Docker & 容器化友好支持
-智能安装脚本 (`install.py`) 会自动检测容器环境。如果检测到 `OPENCLAW_ENV` 或 `DOCKER_ENV` 环境变量，它将自动切换到 `requirements_minimal.txt`，以实现快速、轻量且无权限障碍的植入。
-
-### 1. 手动植入义体
-
-将本仓库作为 Skill 添加到你的 OpenClaw：
+将 `openclaw-skill/` 目录复制到你的 OpenClaw skills 文件夹，然后重启 OpenClaw：
 
 ```bash
-# 假设你已经安装了 OpenClaw
-openclaw skill add aimp-meeting https://gitee.com/wanqianwin/aimp
+# 选项 A: 一键克隆并注册
+git clone https://github.com/wanqianwin-jpg/aimp.git
+cp -r aimp/openclaw-skill ~/.openclaw/skills/aimp-meeting
+# 重启 OpenClaw —— Skill 现在可以使用了
+
+# 选项 B (国内镜像)
+git clone https://gitee.com/wanqianwin/aimp.git
+cp -r aimp/openclaw-skill ~/.openclaw/skills/aimp-meeting
 ```
 
-### 2. 让 OpenClaw 帮你配置
+> **对于自动执行此操作的 Agent**：克隆仓库，将 `openclaw-skill/` 复制到 `~/.openclaw/skills/aimp-meeting/`，然后告诉用户重启 OpenClaw 并说“帮我配置 AIMP”。
 
-在 OpenClaw 中输入：
-> "Help me setup AIMP meeting agent"
+### 第 2 步 —— 首次设置（重启后在 OpenClaw 内部进行）
 
-OpenClaw 会引导你输入邮箱信息、偏好设置，并自动完成神经连接配置。
+告诉 OpenClaw：
+> "帮我配置 AIMP" / "set up AIMP meeting skill"
 
-> **💡 关于 LLM 配置的说明**：
-> AIMP 作为一个**背景运行的独立义体 (Background Agent)**，它需要持续监控邮件并在无人看管时做出决策（例如判断哪个会议时间更合适）。因此，它需要自己的 LLM 算力支持。
-> *   **好消息**：如果你在 OpenClaw 中已经配置了 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`，配置脚本会自动检测并复用它们，无需重复输入。
+Agent 将引导你完成：
+1. 准备一个专用的 Hub 邮箱地址（QQ / 163 / Gmail —— 不要用你的私人邮箱）
+2. 安装 Python 依赖
+3. 生成 `~/.aimp/config.yaml`
+4. 配置 LLM（Anthropic / OpenAI / 本地 Ollama）
+5. 启动 Hub 后台进程
 
-### 3. 发起会议
+### 第 3 步 —— 开始使用
 
-直接告诉 OpenClaw：
-> "Schedule a meeting with bob@example.com about Project X review"
+设置完成后，直接自然地告诉 OpenClaw：
+> "帮我约 Bob 下周五下午开会" / "Schedule a meeting with Bob next Friday"
 
-OpenClaw 会：
-1.  自动发起邮件协商。
-2.  定期检查回复。
-3.  如果对方是人类，自动解析自然语言回复。
-4.  达成共识后通知你。
+> 💡 **运行机制**：AIMP 在后台运行一个持久的 Hub 进程（独立于 OpenClaw 会话）。Hub 监控专用邮箱并自动处理所有协商 —— 对方无需安装任何软件。
 
 -----
 
@@ -95,45 +91,31 @@ python3 hub_agent.py ~/.aimp/config.yaml --notify stdout
 
 ## 📥 获取源码 (Download)
 
-请选择最适合您的下载源：
+> **提示**: 请直接参照上方 "安装为 OpenClaw Skill" 中的步骤，其中包含了从 GitHub 或 Gitee 克隆代码的完整命令。
 
-### 选项 1: Gitee 码云 (国内推荐 - 极速)
-- **HTTPS**: `git clone https://gitee.com/wanqianwin/aimp.git`
-- **SSH**: `git clone git@gitee.com:wanqianwin/aimp.git`
-
-### 选项 2: GitHub (国际源)
-- **HTTPS**: `git clone https://github.com/wanqianwin-jpg/aimp.git`
-- **SSH**: `git clone git@github.com:wanqianwin-jpg/aimp.git`
-
-> **提示**: 如果您在中国大陆，为了更快的下载速度，强烈推荐使用 **Gitee** 镜像。
-
-## 💻 操作系统指南
-- **macOS / Linux**: 打开终端 (Terminal) 并运行上面的 `git clone` 命令。
-- **Windows**: 打开 PowerShell 或命令提示符 (cmd) 并运行命令。
-
-## 一、整体架构
+## 整体架构
 
 ```
 aimp/
 ├── lib/                          # 核心库
-│   ├── email_client.py           # IMAP/SMTP 收发封装
+│   ├── email_client.py           # IMAP/SMTP 封装
 │   ├── protocol.py               # AIMP/0.1 协议数据模型
 │   ├── negotiator.py             # LLM 协商决策引擎
 │   ├── session_store.py          # SQLite 会话持久化
 │   └── output.py                 # JSON 结构化输出
 ├── agent.py                      # 独立 Agent（1 人 1 Agent）
 ├── hub_agent.py                  # Hub Agent（1 个 Agent 服务多人） ← 新增
-├── run_demo.py                   # 3 Agent 独立演示
+├── run_demo.py                   # 3-Agent 独立演示
 ├── config/                       # 演示用配置
 │
 ├── openclaw-skill/               # OpenClaw Skill 发布目录
-│   ├── SKILL.md                  # Skill 定义 + runbook（含 Hub 模式说明）
+│   ├── SKILL.md                  # Skill 定义 + 运行指南
 │   ├── scripts/
 │   │   ├── initiate.py           # 发起会议（自动检测 hub/standalone）
 │   │   ├── poll.py               # 单次轮询
 │   │   ├── respond.py            # 注入主人回复
 │   │   ├── status.py             # 查询状态
-│   │   └── setup_config.py       # 配置生成（hub/standalone 均支持）
+│   │   └── setup_config.py       # 配置生成向导（支持两种模式）
 │   └── references/
 │       ├── protocol-spec.md      # 协议规范
 │       └── config-example.yaml   # 配置示例（两种模式）
@@ -141,37 +123,38 @@ aimp/
 └── requirements.txt
 ```
 
-## 两种部署模式对比
+## 部署模式
 
 | | Hub 模式 | 独立模式 |
 |---|---|---|
-| **谁来部署** | 1 人（Host）搞定，其他人开箱即用 | 每人各自部署 |
-| **内部调度** | 即时出结果（1 次 LLM，无邮件） | 多轮邮件协商 |
+| **谁来部署** | 1 人（Host） | 每人各自部署 |
+| **谁可以使用** | 所有列出的成员 | 仅限所有者 |
+| **内部调度** | 即时（1 次 LLM，无邮件） | 多轮邮件协商 |
 | **外部联系人** | 标准邮件协商 | 标准邮件协商 |
-| **LLM 成本** | 共享，1 个 key | 每人一个 |
-| **配置标志** | `members:` + `hub:` | `owner:` + `agent:` |
+| **LLM 成本** | 共享，1 个 Key | 每人一个 |
+| **配置字段** | `members:` + `hub:` | `owner:` + `agent:` |
 
 **Hub 模式配置片段：**
 ```yaml
 mode: hub
 hub:
-  name: "家庭助理"
+  name: "Family Hub"
   email: "family-hub@gmail.com"
 members:
   alice:
     email: "alice@gmail.com"
     role: "admin"
     preferences:
-      preferred_times: ["工作日上午"]
+      preferred_times: ["weekday mornings"]
       preferred_locations: ["Zoom"]
   bob:
     email: "bob@gmail.com"
     role: "member"
     preferences:
-      preferred_times: ["下午 14:00-17:00"]
-      preferred_locations: ["腾讯会议"]
+      preferred_times: ["afternoon 14:00-17:00"]
+      preferred_locations: ["Tencent Meeting"]
 llm:
-  provider: "local"         # Ollama — 免费，跑在自己机器上
+  provider: "local"        # Ollama — 免费，跑在自己机器上
   model: "llama3"
   base_url: "http://localhost:11434/v1"
 ```
@@ -186,12 +169,12 @@ llm:
 - [x] **v0.2 (Hub 模式)**
     - [x] **Hub 模式**：一个 Agent 服务家庭/团队多人
     - [x] **上帝视角调度**：内部成员之间 1 次 LLM 即出结果，零邮件往返
-    - [x] **自动身份识别**：发件人邮箱白名单，无需用户记标签
+    - [x] **自动身份识别**：基于白名单的发件人身份识别
     - [x] **本地 LLM 支持**（Ollama/LM Studio）：无需 API Key
-    - [x] **混合模式**：内部成员快速调度 + 外部联系人邮件协商
+    - [x] **混合模式**：Hub 处理内部快速路径 + 外部邮件协商
 - [ ] **v1.0 (Release)**
     - [ ] 日历集成（Google Calendar / Outlook）
-    - [ ] 多语言支持（i18n）
+    - [ ] 多语言支持 (i18n)
     - [ ] 企业级部署指南
     - [ ] Docker Compose Hub 部署方案
 
@@ -200,25 +183,18 @@ llm:
 邮件 Subject: `[AIMP:<session_id>] v<version> <topic>`
 
 | action   | 含义         | 触发条件 |
-|----------|--------------|----------|
-| propose  | 发起提议     | 人类要求约会议 |
-| accept   | 接受当前提议 | 所有项目都匹配偏好 |
+|----------|--------------|-------------------|
+| propose  | 发起提议     | 人类要求发起会议 |
+| accept   | 接受提议     | 所有项目都匹配偏好 |
 | counter  | 反提议       | 部分匹配，提出替代方案 |
-| confirm  | 最终确认     | 所有参与者都 accept |
-| escalate | 升级给人类   | 超出偏好范围无法自动决策 |
+| confirm  | 最终确认     | 所有参与者都接受 |
+| escalate | 升级给人类   | 无法自动做出决策 |
 
-超过 5 轮未达成共识，自动通知人类介入。
-
-## 两种通知模式
-
-| 模式 | 用途 | escalation 方式 |
-|------|------|-----------------|
-| `email` | 独立运行 | 发邮件给主人 |
-| `stdout` | OpenClaw Skill | 输出 JSON 事件，由 OpenClaw 转发到 IM |
+如果 5 轮后仍未达成共识，将自动升级为人工干预。
 
 ## 降级兼容
 
-联系人没有 Agent 时（`has_agent: false`），自动发自然语言邮件，用 LLM 解析人类的自由文本回复。
+当联系人没有 Agent 时（`has_agent: false`），会自动发送自然语言邮件，并使用 LLM 解析人类的自由文本回复。
 
 ## 环境变量
 
@@ -235,9 +211,9 @@ llm:
 
 本项目自豪地采用先进的 AI 工具进行开发。我们信仰透明度以及 AI 原生软件工程的未来。
 
-- **IDE**: Trae (由 Gemini-1.5-Pro / Claude-3.5-Sonnet 驱动)
-- **CLI**: Claude Code (Claude 3.7 Sonnet)
-- **模型**: Gemini 1.5 Pro
+- **IDE**: Trae (由 Gemini-3-Pro / Claude-4.6-Sonnet 驱动)
+- **CLI**: Claude Code (Claude 4.6 Sonnet)
+- **模型**: Gemini 3 Pro
 
 关于具体的使用场景和责任声明，请参阅 [AI_USAGE.md](AI_USAGE.md)。
 

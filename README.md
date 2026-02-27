@@ -13,73 +13,51 @@
 > *   **Cyber-Fusion**: Utilizing the ancient email network as synapses, requiring no installation from the other party.
 > *   **Cyberware Enhancement**: Install a "Diplomat" implant for your Agent, allowing it to negotiate with other Agents or humans in the background.
 >
-> **Hub Mode** (v0.2): One Agent serves a whole family or team. Internal members get instant scheduling via "god view" — no email rounds needed. External contacts still use standard email negotiation.
+> **Hub Mode** (v0.2.0): One Agent serves a whole family or team. Internal members get instant scheduling via "god view" — no email rounds needed. External contacts still use standard email negotiation.
+>
+> **The Room** (v0.2.0): Async content negotiation with deadlines. Perfect for documents, budgets, and complex decisions.
 >
 > **Fallback Compatibility**: If the recipient does not have an Agent, AIMP automatically sends a natural language email and parses the reply using an LLM.
 
 [中文文档](README_zh.md)
 
-## 📥 Get Source Code
+##  Install as OpenClaw Skill
 
-Grab the code from the location that's fastest for you.
+### Step 1 — Register the Skill
 
-### Option 1: GitHub (International Recommended)
-- **HTTPS**: `git clone https://github.com/wanqianwin-jpg/aimp.git`
-- **SSH**: `git clone git@github.com:wanqianwin-jpg/aimp.git`
-
-### Option 2: Gitee (China Recommended - Faster)
-- **HTTPS**: `git clone https://gitee.com/wanqianwin/aimp.git`
-- **SSH**: `git clone git@gitee.com:wanqianwin/aimp.git`
-
-> **Note**: If you are in mainland China and experience slow connection to GitHub, the **Gitee** mirror is your best friend.
-
-## 💻 OS-Specific Instructions
-- **macOS / Linux**: Open Terminal and run the `git clone` command above.
-- **Windows**: Open PowerShell or Command Prompt (cmd) and run the command.
-
-## 🚀 How to Use (OpenClaw Skill)
-
-AIMP works seamlessly as an **OpenClaw Skill**. If you are using **OpenClaw**, simply copy and paste the following prompt to implant this cyberware:
-
-> **[OpenClaw Implant Command]**
-> "Please help me install AIMP meeting skill from `https://gitee.com/wanqianwin/aimp` or `https://github.com/wanqianwin-jpg/aimp`. 
-> 1. Clone the neural synapse repo and run `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`. 
-> 2. Run `python3 openclaw-skill/scripts/setup_config.py --interactive` to help me configure the comms protocol. 
-> 3. Once installed, let's schedule a test meeting!"
-
-### 🐳 Docker & Container Friendly
-The installation script (`install.py`) automatically detects container environments. If `OPENCLAW_ENV` or `DOCKER_ENV` is set, it switches to `requirements_minimal.txt` for a fast, lightweight, and permission-safe installation.
-
-### 1. Install Skill manually
-
-Add this repository as a Cyberware to your OpenClaw:
+Copy the `openclaw-skill/` directory into your OpenClaw skills folder, then restart OpenClaw:
 
 ```bash
-# Assuming you have OpenClaw installed
-openclaw skill add aimp-meeting https://github.com/wanqianwin-jpg/aimp
+# Option A: clone and register in one go
+git clone https://github.com/wanqianwin-jpg/aimp.git
+cp -r aimp/openclaw-skill ~/.openclaw/skills/aimp-meeting
+# restart OpenClaw — the skill is now available
+
+# Option B (China mirror)
+git clone https://gitee.com/wanqianwin/aimp.git
+cp -r aimp/openclaw-skill ~/.openclaw/skills/aimp-meeting
 ```
 
-### 2. Let OpenClaw help you configure
+> **For agents doing this automatically**: clone the repo, copy `openclaw-skill/` to `~/.openclaw/skills/aimp-meeting/`, then tell the user to restart OpenClaw and say "set up AIMP".
 
-Enter in OpenClaw:
-> "Help me setup AIMP meeting agent"
+### Step 2 — First-time Setup (inside OpenClaw after restart)
 
-OpenClaw will guide you to enter email information, preferences, and complete the configuration automatically.
+Tell OpenClaw:
+> "帮我配置 AIMP" / "set up AIMP meeting skill"
 
-> **💡 Note on LLM Configuration**:
-> AIMP is a **Background Agent** that monitors emails and makes decisions independently (e.g., deciding which meeting time is best) even when you're not actively using it. Therefore, it needs its own LLM computing power.
-> *   **Good News**: If you have already configured `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in your environment, the setup script will automatically detect and reuse them.
+The agent will walk you through:
+1. Preparing a dedicated Hub email address (QQ / 163 / Gmail — not your personal email)
+2. Installing Python dependencies
+3. Generating `~/.aimp/config.yaml`
+4. Configuring the LLM (Anthropic / OpenAI / local Ollama)
+5. Starting the Hub background process
 
-### 3. Schedule a Meeting
+### Step 3 — Use It
 
-Tell OpenClaw directly:
-> "Schedule a meeting with bob@example.com about Project X review"
+Once set up, just tell OpenClaw naturally:
+> "帮我约 Bob 下周五下午开会" / "Schedule a meeting with Bob next Friday"
 
-OpenClaw will:
-1.  Automatically initiate email negotiation.
-2.  Periodically check for replies.
-3.  If the recipient is human, automatically parse the natural language reply.
-4.  Notify you after consensus is reached.
+> 💡 **How it works**: AIMP runs a persistent Hub process in the background (independent of OpenClaw sessions). The Hub monitors a dedicated email address and handles all negotiation automatically — no installation required on the other party's side.
 
 -----
 
@@ -229,9 +207,9 @@ When a contact does not have an Agent (`has_agent: false`), a natural language e
 
 This project proudly leverages advanced AI tools for development. We believe in transparency and the future of AI-native software engineering.
 
-- **IDE**: Trae (Powered by Gemini-1.5-Pro / Claude-3.5-Sonnet)
-- **CLI**: Claude Code (Claude 3.7 Sonnet)
-- **Model**: Gemini 1.5 Pro
+- **IDE**: Trae (Powered by Gemini-3-Pro / Claude-4.6-Sonnet)
+- **CLI**: Claude Code (Claude 4.6 Sonnet)
+- **Model**: Gemini 3 Pro
 
 For detailed usage scenarios and responsibility declaration, please refer to [AI_USAGE.md](AI_USAGE.md).
 

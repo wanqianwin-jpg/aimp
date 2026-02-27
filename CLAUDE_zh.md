@@ -10,9 +10,11 @@
 | 阶段 | 状态 | 说明 |
 |------|------|------|
 | Phase 1 | ✅ 已完成 | 基于邮件的会议时间/地点协商 |
-| Phase 2 | 🗂️ 规划中 | "The Room" — 带截止日期的异步内容协商 |
+| Phase 2 | ✅ 已实现 | "The Room" — 带截止日期的异步内容协商 |
 
-Phase 1 已完整实现于 `lib/` + `agent.py` + `hub_agent.py`，所有模块可运行。
+Phase 1 已完整实现于 `lib/` + `agent.py` + `hub_agent.py`。所有模块均可运行。
+
+Phase 2 已在同一个 Hub (`hub_agent.py`) 中通过委托给 `RoomNegotiator` 实现。无需单独的 Agent。运行 `python run_room_demo.py` 即可查看完整流程。
 
 -----
 
@@ -31,32 +33,35 @@ Carol (人) ──偏好配置──→ Agent-C ──邮件──→ ┘
 ### Hub 模式（推荐）— "Hub Skill" 范式
 
 ```
-新用户 ──[AIMP-INVITE:邀请码]──→ ┐
-成员   ──「帮我约 Bob 开会」──→  ├─ HubAgent（1个邮箱）──邮件──→ 外部联系人 / 外部 Agent
-                                └─（内部成员：无邮件，直接 LLM 调度）
-                                           ↓
-                                   通知所有参与者
+新用户 ──[AIMP-INVITE:code]──→ ┐
+成员   ──"schedule meeting"──→ ├─ HubAgent (1 个邮箱地址) ──→ 外部联系人 / Agents
+                                 │
+                         (内部：直接 LLM 调度)
+                                 ↓
+                     通知所有参与者
 ```
 
-Hub 是一个**单点部署的 Skill**——用户只需通过邮件交互，自己不需要部署任何 Agent。
+Hub 是一个**单点部署的 Skill** —— 用户只需通过邮件交互。用户侧不需要部署 Agent。
 
 **完整邮件生命周期：**
 
 | 阶段 | 操作方 | 动作 | 邮件主题模式 |
-|------|--------|------|-------------|
-| 0. 准备 | 管理员 | 在 config.yaml 创建邀请码 | — |
-| 1. 注册 | 新用户 | 发邮件给 Hub，主题含邀请码 | `[AIMP-INVITE:邀请码]` |
+|-------|-------|--------|----------------------|
+| 0. 注册 | 管理员 | 在 config.yaml 中创建邀请码 | — |
+| 1. 自助注册 | 新用户 | 给 Hub 发邮件，主题含邀请码 | `[AIMP-INVITE:code]` |
 | 1. 回复 | Hub | 校验邀请码，注册用户，发欢迎邮件 + hub-card JSON | — |
-| 2. 发起请求 | 成员 | 自然语言约会邮件 | （任意） |
-| 2. 信息不全 | Hub | 回邮件要求补充（主题/参与者/时间偏好） | — |
-| 3. 发出邀请 | Hub | LLM 解析 → 自动调用 `initiate_meeting()` | `[AIMP:session_id]` |
-| 3. 发起者投票 | Hub | 给发起者发投票邀请（他也是投票方） | `[AIMP:session_id]` |
-| 4. 投票 | 所有人 | 回邮件提交时间/地点偏好 | `[AIMP:session_id]` |
-| 5. 确认 | Hub | 达成共识，通知所有参与者 | — |
+| 2. 会议请求 | 成员 | 自然语言会议请求 | (任意) |
+| 2. 信息不全 | Hub | 回复要求补充信息 (主题 / 参与者 / 可用性) | — |
+| 3. 发出邀请 | Hub | LLM 解析 → 自动派发 `initiate_meeting()` | `[AIMP:session_id]` |
+| 3. 发起者投票 | Hub | 给发起者发送投票邀请 (他们也是投票方) | `[AIMP:session_id]` |
+| 4. 投票 | 所有人 | 回复时间/地点偏好 | `[AIMP:session_id]` |
+| 5. 达成共识 | Hub | 通知所有参与者确认的时间/地点 | — |
 
-**Hub 集中协调（非「上帝视角」）：**
-config 中的 `preferences` 是历史偏好记录，**不代表本次会议的真实可用时间**。
-Hub 内部会议的正确流程：Hub 并行给所有成员发「请告知可用时间」邮件，收集每人对本次会议的真实回复，再汇总求共识。没有预生成选项，没有假设。
+**上帝视角设计说明：** 配置中的 `preferences` 仅作为生成初始候选时间/地点选项的 *提示*。实际的每次会议投票始终来自每个参与者的个人邮件回复。静态配置无法代表实时可用性。
+
+**关键设计：降级兼容**
+
+如果收件人没有 Agent，则向该人的电子邮箱发送自然语言邮件，并使用 LLM 解析该人的自由文本回复。这使得 AIMP 从第一天起就可以被单个人使用。
 
 -----
 
@@ -64,27 +69,38 @@ Hub 内部会议的正确流程：Hub 并行给所有成员发「请告知可用
 
 ```
 aimp/
-├── lib/                          # 核心库（正式实现）
+├── lib/                          # 核心库 (规范实现)
 │   ├── __init__.py
+│   ├── transport.py              # BaseTransport ABC + EmailTransport（包装 EmailClient）
+│   │                             #   Agent 面向 BaseTransport 编程；可替换为 Telegram/Slack 等
 │   ├── email_client.py           # IMAP/SMTP 封装，支持 OAuth2 & SSL
-│   ├── protocol.py               # AIMP/0.1 协议数据模型（AIMPSession、ProposalItem）
-│   ├── negotiator.py             # LLM 决策引擎（Negotiator、HubNegotiator）
-│   ├── session_store.py          # SQLite 持久化（sessions + message_ids 两张表）
-│   └── output.py                 # JSON stdout 事件输出（供 OpenClaw 解析）
-├── agent.py                      # Standalone Agent（AIMPAgent）
-├── hub_agent.py                  # Hub Agent（AIMPHubAgent 继承 AIMPAgent）
-│                                 #   - 邮箱白名单身份识别
-│                                 #   - 内部成员上帝视角调度
-│                                 #   - 邀请码自助注册系统
-│                                 #   - Stage-2 LLM 请求解析与派发
-│                                 #   - create_agent() 工厂函数：自动检测模式
-├── run_demo.py                   # 3-Agent Standalone 演示脚本
+│   │                             #   Phase 2: send_cfp_email, fetch_phase2_emails
+│   │                             #   ParsedEmail: 新增 phase, deadline, room_id 字段
+│   ├── protocol.py               # AIMP/0.1 协议数据模型
+│   │                             #   Phase 1: AIMPSession, ProposalItem
+│   │                             #   Phase 2: AIMPRoom, Artifact
+│   ├── negotiator.py             # LLM 决策引擎 (Negotiator, HubNegotiator)
+│   ├── session_store.py          # SQLite 持久化
+│   │                             #   Phase 1: sessions + sent_messages 表
+│   │                             #   Phase 2: rooms 表 (save_room/load_room/load_open_rooms)
+│   └── output.py                 # JSON stdout 事件发射 (供 OpenClaw 使用)
+├── agent.py                      # 独立 Agent (AIMPAgent)
+├── hub_agent.py                  # Hub Agent (AIMPHubAgent 继承自 AIMPAgent)
+│                                 #   Phase 1: 调度、邀请码、成员白名单
+│                                 #   Phase 2: RoomNegotiator, initiate_room, _handle_room_email,
+│                                 #            _finalize_room, _check_deadlines, veto flow
+│                                 #   create_agent() 工厂：根据配置自动检测模式
+├── hub_prompts.py                # Phase 1 LLM 提示词模板 (调度)
+├── room_prompts.py               # Phase 2 LLM 提示词模板 (内容协商)
+│                                 #   parse_amendment, aggregate_amendments, generate_minutes
+├── run_demo.py                   # Phase 1: 3-Agent 独立演示
+├── run_room_demo.py              # Phase 2: 房间协商演示 (内存模拟，无真实邮件)
 ├── openclaw-skill/
-│   ├── SKILL.md                  # OpenClaw 操作手册（Hub + Standalone）
+│   ├── SKILL.md                  # OpenClaw 运行指南 (hub + standalone)
 │   └── scripts/
-│       ├── initiate.py           # 使用 create_agent()，Hub 模式支持 --initiator
+│       ├── initiate.py           # 使用 create_agent(), hub 模式支持 --initiator
 │       ├── poll.py               # 使用 create_agent()
-│       ├── respond.py            # Hub 感知的配置加载
+│       ├── respond.py            # 支持 Hub 的配置加载
 │       ├── status.py
 │       └── setup_config.py       # Hub 向导 + Standalone 向导
 ├── config/
@@ -92,15 +108,15 @@ aimp/
 │   ├── agent_b.yaml
 │   └── agent_c.yaml
 ├── docs/
-│   ├── VISION_ARTICLE.md         # 概念文章：异步 AI 时代范式
+│   ├── VISION_ARTICLE.md         # 概念文章：异步 AI 时间范式
 │   ├── PHASE2_ROOM_ARCHITECTURE.md  # Phase 2 设计文档
 │   ├── STYLE_GUIDE.md
 │   └── MAINTENANCE_CHECKLIST.md
-└── openclaw-skill/references/
+└── references/
     └── config-example.yaml       # 两种模式的配置示例
 ```
 
-根目录下的 `email_client.py`、`negotiator.py`、`protocol.py` 是旧版备份——请使用 `lib/` 下的版本。
+根目录下的 `email_client.py`、`negotiator.py`、`protocol.py` 是旧版备份 —— 请使用 `lib/` 下的版本。
 
 -----
 
@@ -108,12 +124,12 @@ aimp/
 
 自动检测：有 `members:` 字段 → Hub 模式；有 `owner:` 字段 → Standalone 模式。
 
-### Hub 模式配置
+### Hub Mode Config
 
 ```yaml
 mode: hub
 hub:
-  name: "家庭 Hub"
+  name: "Family Hub"
   email: "family-hub@gmail.com"
   imap_server: "imap.gmail.com"
   smtp_server: "smtp.gmail.com"
@@ -124,21 +140,23 @@ hub:
 members:
   alice:
     name: "Alice"
-    email: "alice@gmail.com"     # 白名单身份认证 + 接收通知
-    role: "admin"                # admin 可管理配置；member 只能使用
+    email: "alice@gmail.com"     # 白名单身份 + 通知
+    role: "admin"                # 管理员可以管理配置；成员只能使用
     preferences:
-      preferred_times: ["工作日上午"]
-      blocked_times: ["周五下午"]
+      preferred_times: ["weekday mornings"]
+      blocked_times: ["Friday afternoons"]
       preferred_locations: ["Zoom"]
+      auto_accept: true
   bob:
     name: "Bob"
     email: "bob@gmail.com"
     role: "member"
     preferences:
-      preferred_times: ["下午 14:00-17:00"]
-      preferred_locations: ["腾讯会议"]
+      preferred_times: ["afternoon 14:00-17:00"]
+      preferred_locations: ["Tencent Meeting"]
+      auto_accept: true
 
-contacts:                        # 外部联系人（Hub 外部）
+contacts:                        # 外部 (Hub 之外)
   Dave:
     human_email: "dave@gmail.com"
     has_agent: false
@@ -148,17 +166,17 @@ invite_codes:
   - code: "welcome-2026"
     expires: "2026-12-31"
     max_uses: 3
-    used: 0              # Hub 自动更新，请勿手动修改
+    used: 0              # 由 Hub 自动更新，请勿手动编辑
 
-trusted_users: {}        # 用户通过邀请码注册后自动填入
+trusted_users: {}        # 当用户通过邀请码注册时自动填充
 
 llm:
-  provider: "anthropic"
-  model: "claude-sonnet-4-6"
-  api_key_env: "ANTHROPIC_API_KEY"
+  provider: "local"              # Ollama (免费，常驻机器)
+  model: "llama3"
+  base_url: "http://localhost:11434/v1"
 ```
 
-### Standalone 模式配置（向后兼容）
+### Standalone 模式配置 (向后兼容)
 
 ```yaml
 agent:
@@ -173,8 +191,8 @@ owner:
   email: "alice@gmail.com"
 
 preferences:
-  preferred_times: ["工作日上午 9:00-12:00"]
-  blocked_times: ["周五下午"]
+  preferred_times: ["weekday mornings 9:00-12:00"]
+  blocked_times: ["Friday afternoons"]
   preferred_locations: ["Zoom"]
   auto_accept: true
 
@@ -186,30 +204,23 @@ contacts:
 
 llm:
   provider: "anthropic"
-  model: "claude-sonnet-4-6"
+  model: "claude-3-5-sonnet-20240620"
   api_key_env: "ANTHROPIC_API_KEY"
 ```
 
 -----
 
-## 四、协议格式（AIMP/0.1）
+## 四、协议格式 (AIMP/0.1)
 
 ### 4.1 邮件规范
 
 - **Subject**: `[AIMP:<session_id>] v<version> <简要描述>`
-  - 例：`[AIMP:meeting-001] v1 Q1 复盘会时间协商`
-- **邮件正文**：纯文本，人类可读摘要
-- **JSON 附件**：`protocol.json`，结构化协议数据
-- **References 头**：引用线程中前一封邮件的 Message-ID
+  - 示例: `[AIMP:meeting-001] v1 Q1 复盘会议时间协商`
+- **Body**: 纯文本，人类可读的摘要
+- **JSON 附件**: `protocol.json`，结构化协议数据
+- **References Header**: 引用线程中前一封邮件的 Message-ID
 
-### 4.2 特殊邮件主题模式
-
-| 模式 | 含义 |
-|------|------|
-| `[AIMP:xxx]` | AIMP 协议邮件（会议协商） |
-| `[AIMP-INVITE:code]` | 邀请码注册申请（不被协议收件人过滤） |
-
-### 4.3 protocol.json 结构
+### 4.2 protocol.json 结构
 
 ```json
 {
@@ -218,38 +229,55 @@ llm:
   "version": 3,
   "from": "alice-agent@example.com",
   "action": "propose",
-  "participants": ["alice-agent@...", "bob-agent@..."],
-  "topic": "Q1 复盘会",
+  "participants": [
+    "alice-agent@example.com",
+    "bob-agent@example.com",
+    "carol-agent@example.com"
+  ],
+  "topic": "Q1 Review Meeting",
   "proposals": {
     "time": {
       "options": ["2026-03-01T10:00", "2026-03-02T14:00"],
-      "votes": {"alice-agent@...": "2026-03-01T10:00", "bob-agent@...": null}
+      "votes": {
+        "alice-agent@example.com": "2026-03-01T10:00",
+        "bob-agent@example.com": null,
+        "carol-agent@example.com": null
+      }
     },
     "location": {
-      "options": ["Zoom", "线下会议室"],
-      "votes": {"alice-agent@...": "Zoom", "bob-agent@...": null}
+      "options": ["Zoom", "Office 3F", "Tencent Meeting"],
+      "votes": {
+        "alice-agent@example.com": "Zoom",
+        "bob-agent@example.com": null,
+        "carol-agent@example.com": null
+      }
     }
   },
-  "status": "negotiating"
+  "status": "negotiating",
+  "history": [
+    {"version": 1, "from": "alice-agent@example.com", "action": "propose", "summary": "Initiated meeting proposal"},
+    {"version": 2, "from": "bob-agent@example.com", "action": "counter", "summary": "Suggested in-person instead"},
+    {"version": 3, "from": "carol-agent@example.com", "action": "accept", "summary": "Agreed to Time A and in-person"}
+  ]
 }
 ```
 
-### 4.4 action 类型
+### 4.3 Action 类型
 
-| action | 含义 | 触发条件 |
-|--------|------|---------|
-| `propose` | 发起提议 | 人类要求约会议 |
-| `accept` | 接受当前提议 | 所有项目都匹配偏好 |
-| `counter` | 反提议 | 部分匹配，提出替代方案 |
-| `confirm` | 最终确认 | 所有参与者都 accept |
-| `escalate` | 交给人类 | 超出偏好范围，无法自动决策 |
+|action    |含义    |触发条件         |
+|----------|------|-------------|
+|`propose` |发起提案  |人类请求会议      |
+|`accept`  |接受提案|所有项目都匹配偏好    |
+|`counter` |反向提案   |部分匹配，提出替代方案  |
+|`confirm` |最终确认  |所有参与者都接受|
+|`escalate`|升级到人类  |无法自动决策 (超出偏好范围) |
 
-### 4.5 共识规则
+### 4.4 共识规则
 
-- 每个议题（time/location）独立投票
-- 某选项获得所有参与者投票 → 该议题 resolved
-- 所有议题 resolved → 发 `confirm`
-- 超过 5 轮未达成 → `escalate` 给所有人类
+- 每个议题 (时间/地点) 独立投票
+- 如果一个选项收到所有参与者的投票 → 议题已解决
+- 所有议题均已解决 → 发送 `confirm`
+- 超过 5 轮未达成共识 → `escalate` 给所有人类
 
 -----
 
@@ -269,41 +297,36 @@ class SessionStore:
     def load_message_ids(self, session_id) -> list[str]
 ```
 
-### 5.2 lib/email_client.py — IMAP/SMTP 封装
+### 5.2 lib/transport.py — 传输层抽象
+
+Agent 面向 `BaseTransport` 编程，`EmailTransport` 是具体实现（委托给 `EmailClient`）。未来只需实现同一 ABC 即可接入 Telegram、Slack 等传输介质。
 
 ```python
-@dataclass
-class ParsedEmail:
-    message_id: str
-    subject: str
-    sender: str
-    recipients: list[str]
-    body: str
-    attachments: list[dict]
-    references: list[str]
-    session_id: Optional[str] = None    # 从 [AIMP:xxx] 提取
-    raw_date: Optional[str] = None
-    sender_name: Optional[str] = None   # From 头中的显示名（如 "Alice Wang"）
-
-class EmailClient:
-    def fetch_aimp_emails(self, since_minutes=60) -> list[ParsedEmail]
-        # IMAP SEARCH: UNSEEN SUBJECT "[AIMP:"，解析后标记已读
-
-    def fetch_all_unread_emails(self, since_minutes=60) -> list[ParsedEmail]
-        # 获取所有未读邮件（Hub poll 使用，用于收取成员指令）
-
+class BaseTransport(ABC):
+    def my_address(self) -> str                          # 本传输层地址（如邮件地址）
+    def fetch_aimp_emails(self, since_minutes=60)        # Phase 1 收件
+    def fetch_all_unread_emails(self, since_minutes=60)  # Hub：全部未读
+    def fetch_phase2_emails(self, since_minutes=60)      # Phase 2 Room 收件
     def send_aimp_email(self, to, session_id, version, subject_suffix,
-                        body_text, protocol_json, references=None) -> str
-        # 多部分邮件：text/plain 正文 + protocol.json 附件，返回 Message-ID
-
+                        body_text, protocol_json, references=None, in_reply_to=None) -> str
+    def send_cfp_email(self, to, room_id, topic, deadline_iso,
+                       initial_proposal, resolution_rules, body_text, references=None) -> str
     def send_human_email(self, to, subject, body)
-        # 纯文本邮件，用于降级模式或通知
 
+class EmailTransport(BaseTransport):
+    """将每个调用委托给 EmailClient。可直接替换为其他传输实现。"""
+```
+
+### 5.3 lib/email_client.py — IMAP/SMTP 封装（内部）
+
+`EmailClient` 不再被 Agent 直接使用，由 `EmailTransport` 包装。辅助函数仍可从此处导入：
+
+```python
 def is_aimp_email(parsed: ParsedEmail) -> bool
 def extract_protocol_json(parsed: ParsedEmail) -> Optional[dict]
 ```
 
-### 5.3 lib/protocol.py — 会话状态管理
+### 5.4 lib/protocol.py — 会话状态管理
 
 ```python
 class AIMPSession:
@@ -325,7 +348,7 @@ class AIMPSession:
 
 **关键：`ensure_participant(email)`** 会动态将新参与者加入所有已有提案的投票槽，使发起者可以在会议创建后再加入投票。
 
-### 5.4 lib/negotiator.py — LLM 决策引擎
+### 5.5 lib/negotiator.py — LLM 决策引擎
 
 ```python
 class Negotiator:
@@ -346,7 +369,37 @@ class HubNegotiator:
     def generate_member_notify_body(self, topic, result, ...) -> str
 ```
 
-### 5.5 agent.py — AIMPAgent（Standalone 模式）
+### 5.6 lib/protocol.py — Phase 2 数据结构
+
+```python
+@dataclass
+class Artifact:
+    name: str            # e.g. "budget_v1.txt"
+    content_type: str    # "text/plain" | "application/pdf"
+    body_text: str       # text content
+    author: str          # submitter email
+    timestamp: float
+
+@dataclass
+class AIMPRoom:
+    room_id: str
+    topic: str
+    deadline: float                          # Unix timestamp
+    participants: list[str]
+    initiator: str
+    artifacts: dict[str, Artifact]           # {name: Artifact}
+    transcript: list[HistoryEntry]           # discussion log
+    status: str                              # "open" → "locked" → "finalized"
+    resolution_rules: str                    # "majority" | "consensus" | "initiator_decides"
+    accepted_by: list[str]                   # emails that sent ACCEPT
+
+    def is_past_deadline(self) -> bool
+    def all_accepted(self) -> bool
+    def add_to_transcript(self, from_agent, action, summary)
+    def to_json(self) / from_json(cls, data)
+```
+
+### 5.7 agent.py — AIMPAgent（Standalone 模式）
 
 ```python
 class AIMPAgent:
@@ -357,11 +410,13 @@ class AIMPAgent:
     def poll(self) -> list[dict]               # 一次轮询：收邮件 → 逐条处理
     def handle_email(self, parsed)             # 路由到 _handle_aimp_email 或 _handle_human_email
     def initiate_meeting(self, topic, participant_names) -> str  # 返回 session_id
+
+# 关键属性：self.transport (EmailTransport) — 所有 I/O 通过此接口
 ```
 
 会话状态通过 `SessionStore` 持久化到 SQLite（不是内存字典）。
 
-### 5.6 hub_agent.py — AIMPHubAgent（Hub 模式）
+### 5.8 hub_agent.py — AIMPHubAgent（Hub 模式）
 
 ```python
 class AIMPHubAgent(AIMPAgent):
@@ -375,12 +430,8 @@ class AIMPHubAgent(AIMPAgent):
 
     # Stage-2 处理器 — 核心指令处理：
     def handle_member_command(from_email, body) -> list[dict]
-        # 1. LLM 解析 → {action, topic, participants, initiator_times, initiator_locs, missing}
-        # 2. 完整性校验 → 缺字段则回邮件要求补充
-        # 3. 联系人解析 → 找不到邮箱则回邮件要求提供
-        # 4. 将发起者声明的可用时间存为临时偏好
-        # 5. 自动派发 initiate_meeting()
-        # 6. 给发起者发投票邀请（他也是投票方之一）
+        # 完整处理流程请参见「八、Stage-2 指令处理流程」
+        # 包含：LLM解析 -> 完整性校验 -> 联系人解析 -> 临时偏好存储 -> 派发 initiate_meeting -> 发起者投票邀请
 
     # Stage-2 helper 方法：
     def _parse_member_request(member_name, body) -> dict
@@ -393,16 +444,15 @@ class AIMPHubAgent(AIMPAgent):
     # 邀请码自助注册：
     def _check_invite_email(parsed) -> Optional[list[dict]]   # 检测主题中的 [AIMP-INVITE:code]
     def _handle_invite_request(from_email, sender_name, code) -> list[dict]
-        # 校验 → 注册 → 发欢迎邮件（含 hub-card JSON 块）
+        # 流程详情请参见「七、邀请码注册流程」
+        # 校验 → 注册 → 发欢迎邮件
     def _validate_invite_code(code) -> Optional[dict]          # 检查过期时间 + 使用次数
     def _register_trusted_user(email, name, via_code)          # 加入 members + _email_to_member
     def _consume_invite_code(code)
     def _persist_config()   # 将 invite_codes + trusted_users 写回 config.yaml
 
     # hub-card（嵌入欢迎邮件正文的 JSON 块，供 AI Agent 读取）：
-    # {"aimp_hub": {"name", "email", "protocol", "capabilities",
-    #               "registered_members", "usage": {"schedule_meeting": {...}},
-    #               "session_threading": {"pattern": "[AIMP:{session_id}]"}}}
+    # 结构详情请参见「七、邀请码注册流程」中的 hub-card 部分
 
 def create_agent(config_path, **kwargs) -> AIMPAgent | AIMPHubAgent
     # 工厂函数：config 有 "members:" → AIMPHubAgent；有 "owner:" → AIMPAgent
@@ -559,9 +609,11 @@ _parse_member_request()  ──  LLM 解析
 
 -----
 
-## 十一、Phase 2 路线图 — "The Room"
+## 十一、Phase 2 — "The Room" (✅ 已实现)
 
-Phase 2 将 AIMP 从调度（时间/地点）扩展为**内容协商**（文档、预算、提案），在带截止日期的异步窗口内完成。
+Phase 2 将 AIMP 从调度（时间/地点）扩展为**内容协商**（文档、预算、提案），在带截止日期的异步窗口内完成。它作为现有 Hub 的扩展实现——无需单独的 Agent。
+
+### 核心概念
 
 | | Phase 1 | Phase 2 |
 |---|---|---|
@@ -569,11 +621,45 @@ Phase 2 将 AIMP 从调度（时间/地点）扩展为**内容协商**（文档�
 | 收敛触发条件 | 全体一致投票 | 所有人发 ACCEPT，或截止日期到达 |
 | Hub 角色 | 调度员 | 房间管理员 |
 | 输出 | 确认的会议时间 | 会议纪要 |
+| 状态机 | negotiating → confirmed | open → locked → finalized |
 
-**协议扩展：**
-- `AIMPRoom` 继承 `AIMPSession`：新增 `deadline: float`、`artifacts: dict`、`status: open→locked→finalized`
-- 新 action 类型：`PROPOSE`、`AMEND`、`ACCEPT`、`REJECT`
-- 新邮件头：`X-AIMP-Phase: 2`、`X-AIMP-Deadline: <ISO8601>`
+### 架构决策：Hub 扩展 (非独立 Agent)
+
+Phase 2 逻辑通过委托给 `RoomNegotiator` 驻留在同一个 Hub 邮箱账号中。Hub 的 `poll()` 会优先收取 `[AIMP:Room:]` 邮件（在 Phase 1 处理之前），然后检查过期的截止日期。
+
+### 如何使用
+
+**成员发起 Room** (发邮件给 Hub):
+```
+Subject: (任意)
+Body: 帮我发起一个协商室，和 Bob、Carol 讨论 Q3 预算方案，截止 3 天后。
+      初始提案：研发$60k，市场$25k，运营$15k
+```
+
+**参与者回复动作**:
+- `ACCEPT` — 同意当前提案
+- `AMEND + text` — 提出修改意见
+- `PROPOSE + text` — 提交新草案
+- `REJECT + reason` — 否决提案
+
+**当最终确认时** (所有 ACCEPT 或截止)，Hub 发送会议纪要给所有参与者。参与者可以回复 `CONFIRM` 或 `REJECT <reason>` 进入否决流程。
+
+### 关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `lib/protocol.py` | `Artifact` + `AIMPRoom` 数据类 |
+| `lib/session_store.py` | `rooms` 表: `save_room`/`load_room`/`load_open_rooms` |
+| `lib/email_client.py` | `send_cfp_email`, `fetch_phase2_emails`, Phase 2 邮件头 |
+| `room_prompts.py` | LLM 模板: parse_amendment, aggregate, generate_minutes |
+| `hub_agent.py` | `RoomNegotiator` 类 + 所有 room 生命周期方法 |
+| `run_room_demo.py` | 集成演示 (内存模拟，无真实邮件/LLM) |
+
+### 运行演示
+
+```bash
+python run_room_demo.py
+```
 
 -----
 

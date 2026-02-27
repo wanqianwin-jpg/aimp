@@ -12,7 +12,7 @@ import sqlite3
 import time
 from typing import Optional
 
-from lib.protocol import AIMPSession
+from lib.protocol import AIMPSession, AIMPRoom
 
 
 class SessionStore:
@@ -44,6 +44,12 @@ class SessionStore:
                 session_id TEXT NOT NULL,
                 message_id TEXT NOT NULL,
                 PRIMARY KEY (session_id, message_id)
+            );
+            CREATE TABLE IF NOT EXISTS rooms (
+                room_id    TEXT PRIMARY KEY,
+                data       TEXT NOT NULL,
+                status     TEXT NOT NULL DEFAULT 'open',
+                updated_at REAL NOT NULL
             );
         """)
         self._conn.commit()
@@ -97,6 +103,33 @@ class SessionStore:
             "SELECT message_id FROM sent_messages WHERE session_id = ?", (session_id,)
         ).fetchall()
         return [r[0] for r in rows]
+
+    # ── Room CRUD (Phase 2) / Room 增删改查 ──────────────────────────────────
+
+    def save_room(self, room: AIMPRoom):
+        """Save AIMPRoom to database / 保存 AIMPRoom 到数据库"""
+        data_json = json.dumps(room.to_json(), ensure_ascii=False)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO rooms (room_id, data, status, updated_at) VALUES (?, ?, ?, ?)",
+            (room.room_id, data_json, room.status, time.time()),
+        )
+        self._conn.commit()
+
+    def load_room(self, room_id: str) -> Optional[AIMPRoom]:
+        """Load AIMPRoom from database / 从数据库加载 AIMPRoom"""
+        row = self._conn.execute(
+            "SELECT data FROM rooms WHERE room_id = ?", (room_id,)
+        ).fetchone()
+        if not row:
+            return None
+        return AIMPRoom.from_json(json.loads(row[0]))
+
+    def load_open_rooms(self) -> list[AIMPRoom]:
+        """Load all open (non-finalized) rooms / 加载所有未完成的 Room"""
+        rows = self._conn.execute(
+            "SELECT data FROM rooms WHERE status = 'open' ORDER BY updated_at DESC"
+        ).fetchall()
+        return [AIMPRoom.from_json(json.loads(r[0])) for r in rows]
 
     def close(self):
         """Close database connection / 关闭数据库连接"""

@@ -32,6 +32,9 @@ class ParsedEmail:
     session_id: Optional[str] = None
     raw_date: Optional[str] = None
     sender_name: Optional[str] = None  # Display name from From header (e.g. "Alice Wang")
+    phase: int = 1                     # 1 = Phase 1 scheduling; 2 = Phase 2 Room
+    deadline: Optional[float] = None   # Unix ts from X-AIMP-Deadline header (Phase 2)
+    room_id: Optional[str] = None      # Room ID from [AIMP:Room:{id}] subject (Phase 2)
 
 
 def _decode_str(s) -> str:
@@ -51,6 +54,13 @@ def _extract_session_id(subject: str) -> Optional[str]:
     """Extract session_id from Subject / 从 Subject 中提取 session_id"""
     import re
     m = re.search(r"\[AIMP:([^\]]+)\]", subject)
+    return m.group(1) if m else None
+
+
+def _extract_room_id(subject: str) -> Optional[str]:
+    """Extract room_id from [AIMP:Room:{id}] pattern / 从 [AIMP:Room:{id}] 模式提取 room_id"""
+    import re
+    m = re.search(r"\[AIMP:Room:([^\]]+)\]", subject)
     return m.group(1) if m else None
 
 
@@ -268,6 +278,24 @@ class EmailClient:
         recipients = re.findall(r"[\w.+\-]+@[\w.\-]+", to_raw)
 
         session_id = _extract_session_id(subject)
+        room_id = _extract_room_id(subject)
+
+        # Phase 2 headers / Phase 2 协议头
+        phase_header = msg.get("X-AIMP-Phase", "1")
+        try:
+            phase = int(phase_header)
+        except (ValueError, TypeError):
+            phase = 2 if room_id else 1
+
+        deadline_ts: Optional[float] = None
+        deadline_header = msg.get("X-AIMP-Deadline", "") or ""
+        if deadline_header:
+            try:
+                from datetime import datetime as _dt
+                dt = _dt.fromisoformat(deadline_header.replace("Z", "+00:00"))
+                deadline_ts = dt.timestamp()
+            except Exception:
+                pass
 
         return ParsedEmail(
             message_id=message_id,
@@ -280,6 +308,9 @@ class EmailClient:
             references=references,
             session_id=session_id,
             raw_date=msg.get("Date", ""),
+            phase=phase,
+            deadline=deadline_ts,
+            room_id=room_id,
         )
 
     # ──────────────────────────────────────────────
@@ -373,6 +404,97 @@ class EmailClient:
         self._smtp_send(to, msg)
         logger.info(f"AIMP email sent: {subject} -> {to} / 已发送 AIMP 邮件: {subject} -> {to}")
         return msg_id
+
+    def send_cfp_email(
+        self,
+        to: list[str],
+        room_id: str,
+        topic: str,
+        deadline_iso: str,
+        initial_proposal: str,
+        resolution_rules: str,
+        body_text: str,
+        references: list[str] = None,
+    ) -> str:
+        """
+        Send a Phase 2 Call-for-Proposals (CFP) email and return Message-ID. /
+        发送 Phase 2 内容征询（CFP）邮件，返回 Message-ID。
+
+        Subject: [AIMP:Room:{room_id}] {topic} (Deadline: {deadline_iso})
+        Headers: X-AIMP-Phase: 2, X-AIMP-Deadline: <ISO8601>
+        Attachment: cfp.json
+        """
+        subject = f"[AIMP:Room:{room_id}] {topic} (Deadline: {deadline_iso})"
+        msg = MIMEMultipart("mixed")
+        msg["From"] = self.email_addr
+        msg["To"] = ", ".join(to)
+        msg["Subject"] = subject
+
+        msg_id = f"<aimp-room-{room_id}-{int(time.time())}@{self.email_addr.split('@')[1]}>"
+        msg["Message-ID"] = msg_id
+        msg["X-AIMP-Phase"] = "2"
+        msg["X-AIMP-Deadline"] = deadline_iso
+        msg["X-AIMP-Room"] = room_id
+
+        if references:
+            msg["References"] = " ".join(references)
+
+        cfp_data = {
+            "room_id": room_id,
+            "topic": topic,
+            "deadline": deadline_iso,
+            "initial_proposal": initial_proposal,
+            "resolution_rules": resolution_rules,
+        }
+        cfp_json = json.dumps(cfp_data, ensure_ascii=False, indent=2)
+
+        msg.attach(MIMEText(body_text, "plain", "utf-8"))
+        json_bytes = cfp_json.encode("utf-8")
+        attachment = MIMEApplication(json_bytes, _subtype="json")
+        attachment.add_header("Content-Disposition", "attachment", filename="cfp.json")
+        msg.attach(attachment)
+
+        self._smtp_send(to, msg)
+        logger.info(f"CFP email sent: {subject} -> {to} / 已发送 CFP 邮件: {subject} -> {to}")
+        return msg_id
+
+    def fetch_phase2_emails(self, since_minutes: int = 60) -> list[ParsedEmail]:
+        """
+        Search for unread Phase 2 Room emails and return parsed list. /
+        搜索含 [AIMP:Room: 的未读邮件，返回解析后的列表。
+        """
+        results = []
+        try:
+            conn = self._imap_connect()
+            conn.select("INBOX")
+
+            since_dt = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
+            date_str = since_dt.strftime("%d-%b-%Y")
+
+            status, uids = conn.search(None, f'(UNSEEN SUBJECT "[AIMP:Room:" SINCE {date_str})')
+            if status != "OK":
+                conn.logout()
+                return results
+
+            uid_list = uids[0].split()
+            for uid in uid_list:
+                try:
+                    status, data = conn.fetch(uid, "(RFC822)")
+                    if status != "OK":
+                        continue
+                    raw = data[0][1]
+                    msg = email.message_from_bytes(raw)
+                    parsed = self._parse_email(msg)
+                    if parsed and parsed.room_id:
+                        results.append(parsed)
+                        conn.store(uid, "+FLAGS", "\\Seen")
+                except Exception as e:
+                    logger.warning(f"Failed to parse Phase 2 email uid={uid}: {e}")
+
+            conn.logout()
+        except Exception as e:
+            logger.error(f"IMAP Phase 2 fetch failed: {e} / IMAP Phase 2 获取失败: {e}")
+        return results
 
     def send_human_email(self, to: str, subject: str, body: str):
         """Send plain email to humans / 给人类发普通邮件（降级模式或通知）"""

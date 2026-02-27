@@ -13,10 +13,13 @@ from datetime import date, timedelta
 # Resolve import paths
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from hub_agent import AIMPHubAgent
+import time
+
+from hub_agent import AIMPHubAgent, RoomNegotiator
 from agent import AIMPAgent
 from lib.email_client import ParsedEmail
-from lib.protocol import AIMPSession
+from lib.protocol import AIMPSession, AIMPRoom, Artifact
+from lib.session_store import SessionStore
 
 
 # ── Fixture factory ──────────────────────────────────────────────────────────
@@ -26,6 +29,7 @@ def make_hub(**overrides) -> AIMPHubAgent:
     hub = object.__new__(AIMPHubAgent)
     hub.hub_name = "TestHub"
     hub.hub_email = "hub@test.com"
+    hub.agent_email = "hub@test.com"
     hub.notify_mode = "email"
     hub.members = {}
     hub._raw_config = {"contacts": {}}
@@ -33,13 +37,14 @@ def make_hub(**overrides) -> AIMPHubAgent:
     hub.trusted_users = {}
     hub._email_to_member = {}
     hub._replied_senders = {}
-    hub.email_client = MagicMock()
+    hub.transport = MagicMock()
     hub.store = MagicMock()
     hub.negotiator = MagicMock()
     hub.hub_negotiator = MagicMock()
     hub.hub_negotiator.model = "claude-test"
     hub.hub_negotiator.provider = "anthropic"
     hub.hub_negotiator.client = MagicMock()
+    hub.room_negotiator = MagicMock()
     for k, v in overrides.items():
         setattr(hub, k, v)
     return hub
@@ -51,6 +56,7 @@ def make_parsed(
     body="Some body",
     session_id=None,
     sender_name=None,
+    room_id=None,
 ) -> ParsedEmail:
     return ParsedEmail(
         message_id="<test@x>",
@@ -62,6 +68,27 @@ def make_parsed(
         attachments=[],
         references=[],
         session_id=session_id,
+        room_id=room_id,
+    )
+
+
+def make_room(
+    room_id="room-001",
+    topic="Q3 Budget",
+    participants=None,
+    status="open",
+    deadline_offset=3600,
+) -> AIMPRoom:
+    """Create a minimal AIMPRoom for testing."""
+    if participants is None:
+        participants = ["alice@example.com", "bob@example.com"]
+    return AIMPRoom(
+        room_id=room_id,
+        topic=topic,
+        deadline=time.time() + deadline_offset,
+        participants=participants,
+        initiator="alice@example.com",
+        status=status,
     )
 
 
@@ -295,7 +322,7 @@ class TestCheckInviteEmail(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result[0]["type"], "invite_accepted")
         # Welcome email sent
-        self.hub.email_client.send_human_email.assert_called()
+        self.hub.transport.send_human_email.assert_called()
 
     def test_invalid_code_rejected(self):
         parsed = make_parsed(subject="[AIMP-INVITE:badcode] Register me")
@@ -469,6 +496,447 @@ class TestHandleHumanEmailAutoRegistration(unittest.TestCase):
 
         mock_parent.assert_called_once_with(parsed)
         self.assertEqual(result, ["evt"])
+
+
+# ── Phase 2: initiate_room ────────────────────────────────────────────────────
+
+class TestInitiateRoom(unittest.TestCase):
+    def setUp(self):
+        self.hub = make_hub(
+            members={
+                "alice": {"name": "Alice", "email": "alice@example.com"},
+                "bob": {"name": "Bob", "email": "bob@example.com"},
+            },
+            _email_to_member={
+                "alice@example.com": "alice",
+                "bob@example.com": "bob",
+            },
+        )
+
+    def test_initiate_room_creates_and_saves_room(self):
+        """initiate_room should persist an AIMPRoom and send CFP emails."""
+        deadline = time.time() + 86400
+        room_id = self.hub.initiate_room(
+            topic="Q3 Budget",
+            participants=["alice@example.com", "bob@example.com"],
+            deadline=deadline,
+            initial_proposal="Total: $100k",
+            initiator="alice@example.com",
+        )
+
+        self.assertTrue(room_id.startswith("room-"))
+        self.hub.store.save_room.assert_called_once()
+        saved_room = self.hub.store.save_room.call_args[0][0]
+        self.assertEqual(saved_room.topic, "Q3 Budget")
+        self.assertIn("alice@example.com", saved_room.participants)
+        self.assertEqual(saved_room.status, "open")
+        self.assertEqual(saved_room.resolution_rules, "majority")
+
+    def test_initiate_room_sends_cfp_email(self):
+        """initiate_room should call send_cfp_email with correct params."""
+        deadline = time.time() + 86400
+        self.hub.initiate_room(
+            topic="Budget",
+            participants=["alice@example.com", "bob@example.com"],
+            deadline=deadline,
+            initial_proposal="Draft",
+            initiator="alice@example.com",
+        )
+        self.hub.transport.send_cfp_email.assert_called_once()
+        call_kwargs = self.hub.transport.send_cfp_email.call_args
+        self.assertIn("alice@example.com", call_kwargs[1]["to"] if call_kwargs[1] else call_kwargs[0][0])
+
+    def test_initiate_room_with_initial_proposal_adds_artifact(self):
+        """A non-empty initial_proposal should be stored as an artifact."""
+        deadline = time.time() + 86400
+        self.hub.initiate_room(
+            topic="Proposal",
+            participants=["alice@example.com"],
+            deadline=deadline,
+            initial_proposal="My initial proposal",
+            initiator="alice@example.com",
+        )
+        saved_room: AIMPRoom = self.hub.store.save_room.call_args[0][0]
+        self.assertTrue(len(saved_room.artifacts) > 0)
+        self.assertEqual(len(saved_room.transcript), 1)
+        self.assertEqual(saved_room.transcript[0].action, "PROPOSE")
+
+    def test_initiate_room_no_proposal_no_artifact(self):
+        """Empty initial_proposal should not add any artifacts."""
+        self.hub.initiate_room(
+            topic="Bare Room",
+            participants=["alice@example.com"],
+            deadline=time.time() + 3600,
+            initial_proposal="",
+            initiator="alice@example.com",
+        )
+        saved_room: AIMPRoom = self.hub.store.save_room.call_args[0][0]
+        self.assertEqual(len(saved_room.artifacts), 0)
+        self.assertEqual(len(saved_room.transcript), 0)
+
+    def test_initiate_room_stdout_mode(self):
+        """In stdout mode, no CFP email is sent; an event is emitted."""
+        hub = make_hub(notify_mode="stdout")
+        with patch("hub_agent.emit_event") as mock_emit:
+            room_id = hub.initiate_room(
+                topic="T",
+                participants=["a@b.com"],
+                deadline=time.time() + 3600,
+                initial_proposal="",
+                initiator="a@b.com",
+            )
+        hub.transport.send_cfp_email.assert_not_called()
+        mock_emit.assert_called_once()
+        self.assertEqual(mock_emit.call_args[0][0], "room_created")
+
+
+# ── Phase 2: _handle_room_email ───────────────────────────────────────────────
+
+class TestHandleRoomEmail(unittest.TestCase):
+    def setUp(self):
+        self.hub = make_hub(
+            members={
+                "alice": {"name": "Alice", "email": "alice@example.com"},
+                "bob": {"name": "Bob", "email": "bob@example.com"},
+            },
+            _email_to_member={
+                "alice@example.com": "alice",
+                "bob@example.com": "bob",
+            },
+        )
+        self.room = make_room(
+            participants=["alice@example.com", "bob@example.com"]
+        )
+        self.hub.store.load_room.return_value = self.room
+
+    def test_amend_action_adds_to_transcript(self):
+        """AMEND reply should append to transcript and save room."""
+        self.hub.room_negotiator.parse_amendment.return_value = {
+            "action": "AMEND",
+            "changes": "Increase budget to $120k",
+            "reason": "Market rates increased",
+            "new_content": "Total: $120k",
+        }
+        parsed = make_parsed(
+            sender="bob@example.com",
+            subject="[AIMP:Room:room-001] Q3 Budget",
+            body="I think we need more budget",
+            room_id="room-001",
+        )
+        events = self.hub._handle_room_email(parsed)
+
+        self.hub.store.save_room.assert_called()
+        saved_room: AIMPRoom = self.hub.store.save_room.call_args[0][0]
+        self.assertEqual(len(saved_room.transcript), 1)
+        self.assertEqual(saved_room.transcript[0].action, "AMEND")
+        self.assertEqual(events[0]["type"], "room_amendment_received")
+        self.assertEqual(events[0]["action"], "AMEND")
+
+    def test_accept_updates_accepted_by(self):
+        """ACCEPT reply should add sender to accepted_by."""
+        self.hub.room_negotiator.parse_amendment.return_value = {
+            "action": "ACCEPT",
+            "changes": "",
+            "reason": "Looks good",
+            "new_content": None,
+        }
+        parsed = make_parsed(
+            sender="bob@example.com",
+            room_id="room-001",
+            body="ACCEPT",
+        )
+        self.hub._handle_room_email(parsed)
+
+        saved_room: AIMPRoom = self.hub.store.save_room.call_args[0][0]
+        self.assertIn("bob@example.com", saved_room.accepted_by)
+
+    def test_all_accepted_triggers_finalize(self):
+        """When all participants accept, _finalize_room should be called."""
+        self.hub.room_negotiator.parse_amendment.return_value = {
+            "action": "ACCEPT",
+            "changes": "",
+            "reason": "",
+            "new_content": None,
+        }
+        # Pre-fill alice as already accepted
+        self.room.accepted_by = ["alice@example.com"]
+
+        parsed = make_parsed(
+            sender="bob@example.com",
+            room_id="room-001",
+            body="ACCEPT",
+        )
+        with patch.object(self.hub, "_finalize_room") as mock_finalize:
+            events = self.hub._handle_room_email(parsed)
+
+        mock_finalize.assert_called_once()
+        self.assertEqual(events[0]["type"], "room_finalized")
+        self.assertEqual(events[0]["trigger"], "all_accepted")
+
+    def test_unknown_room_returns_empty(self):
+        """If room_id is not found in store, return empty list."""
+        self.hub.store.load_room.return_value = None
+        parsed = make_parsed(room_id="nonexistent")
+        events = self.hub._handle_room_email(parsed)
+        self.assertEqual(events, [])
+
+    def test_non_participant_ignored(self):
+        """Replies from non-participants are ignored."""
+        self.hub.room_negotiator.parse_amendment.return_value = {
+            "action": "AMEND", "changes": "", "reason": "", "new_content": None
+        }
+        parsed = make_parsed(
+            sender="stranger@out.com",
+            room_id="room-001",
+            body="I want to change things",
+        )
+        events = self.hub._handle_room_email(parsed)
+        self.assertEqual(events, [])
+        self.hub.store.save_room.assert_not_called()
+
+    def test_finalized_room_ignores_late_reply(self):
+        """After finalization, late replies are ignored."""
+        self.room.status = "finalized"
+        parsed = make_parsed(sender="bob@example.com", room_id="room-001", body="AMEND")
+        events = self.hub._handle_room_email(parsed)
+        self.assertEqual(events, [])
+
+
+# ── Phase 2: _finalize_room ───────────────────────────────────────────────────
+
+class TestFinalizeRoom(unittest.TestCase):
+    def setUp(self):
+        self.hub = make_hub()
+        self.room = make_room(participants=["alice@example.com", "bob@example.com"])
+        self.hub.room_negotiator.generate_meeting_minutes.return_value = "# Minutes\n\nResolution: approved"
+
+    def test_finalize_sets_status(self):
+        """_finalize_room should set room.status to 'finalized'."""
+        self.hub._finalize_room(self.room)
+        self.assertEqual(self.room.status, "finalized")
+        self.hub.store.save_room.assert_called()
+
+    def test_finalize_sends_minutes_to_all_participants(self):
+        """_finalize_room should email all participants."""
+        self.hub._finalize_room(self.room)
+        calls = self.hub.transport.send_human_email.call_args_list
+        recipients = [c[1]["to"] if c[1] else c[0][0] for c in calls]
+        self.assertIn("alice@example.com", recipients)
+        self.assertIn("bob@example.com", recipients)
+
+    def test_finalize_stdout_mode_emits_event(self):
+        """In stdout mode, _finalize_room emits a room_finalized event."""
+        hub = make_hub(notify_mode="stdout")
+        hub.room_negotiator = MagicMock()
+        hub.room_negotiator.generate_meeting_minutes.return_value = "# Minutes"
+        with patch("hub_agent.emit_event") as mock_emit:
+            hub._finalize_room(self.room)
+        mock_emit.assert_called_once()
+        self.assertEqual(mock_emit.call_args[0][0], "room_finalized")
+
+    def test_finalize_adds_finalized_transcript_entry(self):
+        """_finalize_room should append a FINALIZED entry to the transcript."""
+        self.hub._finalize_room(self.room)
+        actions = [e.action for e in self.room.transcript]
+        self.assertIn("FINALIZED", actions)
+
+
+# ── Phase 2: _check_deadlines ────────────────────────────────────────────────
+
+class TestCheckDeadlines(unittest.TestCase):
+    def setUp(self):
+        self.hub = make_hub()
+
+    def test_past_deadline_room_is_finalized(self):
+        """Room with deadline in the past should be finalized."""
+        expired_room = make_room(deadline_offset=-1)  # already past
+        self.hub.store.load_open_rooms.return_value = [expired_room]
+
+        with patch.object(self.hub, "_finalize_room") as mock_fin:
+            self.hub._check_deadlines()
+
+        mock_fin.assert_called_once_with(expired_room)
+
+    def test_future_deadline_room_not_touched(self):
+        """Room with future deadline should not be finalized."""
+        active_room = make_room(deadline_offset=3600)
+        self.hub.store.load_open_rooms.return_value = [active_room]
+
+        with patch.object(self.hub, "_finalize_room") as mock_fin:
+            self.hub._check_deadlines()
+
+        mock_fin.assert_not_called()
+
+    def test_check_deadlines_handles_empty_list(self):
+        """No open rooms → no error, no finalization."""
+        self.hub.store.load_open_rooms.return_value = []
+        self.hub._check_deadlines()  # must not raise
+
+
+# ── Phase 2: RoomNegotiator.generate_meeting_minutes ─────────────────────────
+
+class TestRoomNegotiatorGenerateMinutes(unittest.TestCase):
+    def setUp(self):
+        llm_config = {"provider": "anthropic", "model": "claude-test"}
+        with patch("hub_agent.make_llm_client", return_value=(MagicMock(), "claude-test", "anthropic")):
+            self.rn = RoomNegotiator("TestHub", "hub@test.com", llm_config)
+
+    def test_generate_minutes_returns_llm_output(self):
+        room = make_room()
+        room.add_to_transcript("alice@example.com", "PROPOSE", "Proposal A")
+        room.add_to_transcript("bob@example.com", "ACCEPT", "Looks good")
+
+        with patch("hub_agent.call_llm", side_effect=["# Minutes content", "# Minutes content"]):
+            minutes = self.rn.generate_meeting_minutes(room)
+
+        self.assertIsInstance(minutes, str)
+        self.assertTrue(len(minutes) > 0)
+
+    def test_generate_minutes_fallback_on_llm_error(self):
+        """If LLM fails, a fallback Markdown document is generated."""
+        room = make_room()
+        room.add_to_transcript("a@b.com", "ACCEPT", "ok")
+
+        with patch("hub_agent.call_llm", side_effect=Exception("LLM timeout")):
+            minutes = self.rn.generate_meeting_minutes(room)
+
+        self.assertIn("Q3 Budget", minutes)
+        self.assertIn("room-001", minutes)
+
+
+# ── Phase 2: _handle_room_confirm / _handle_room_reject ──────────────────────
+
+class TestRoomVetoFlow(unittest.TestCase):
+    def setUp(self):
+        self.hub = make_hub()
+        self.room = make_room(status="finalized")
+        self.hub.store.load_room.return_value = self.room
+
+    def test_confirm_adds_to_accepted_by(self):
+        """CONFIRM veto reply adds sender to accepted_by."""
+        events = self.hub._handle_room_confirm(self.room, "bob@example.com")
+        self.assertIn("bob@example.com", self.room.accepted_by)
+        self.assertEqual(events[0]["type"], "room_confirmed")
+
+    def test_reject_escalates_to_initiator(self):
+        """REJECT veto reply sends escalation email to initiator."""
+        events = self.hub._handle_room_reject(self.room, "bob@example.com", "Wrong numbers")
+        self.assertEqual(events[0]["type"], "room_rejected")
+        self.assertEqual(events[0]["reason"], "Wrong numbers")
+        # Escalation email to initiator
+        calls = self.hub.transport.send_human_email.call_args_list
+        recipients = [c[1]["to"] if c[1] else c[0][0] for c in calls]
+        self.assertIn(self.room.initiator, recipients)
+
+    def test_handle_human_email_routes_confirm(self):
+        """_handle_human_email routes CONFIRM body for Room email to _handle_room_confirm."""
+        parsed = make_parsed(
+            sender="bob@example.com",
+            body="CONFIRM",
+            room_id="room-001",
+        )
+        with patch.object(self.hub, "_handle_room_confirm", return_value=[{"type": "room_confirmed"}]) as mock_confirm:
+            result = self.hub._handle_human_email(parsed)
+        mock_confirm.assert_called_once()
+        self.assertEqual(result[0]["type"], "room_confirmed")
+
+    def test_handle_human_email_routes_reject(self):
+        """_handle_human_email routes REJECT body for Room email to _handle_room_reject."""
+        parsed = make_parsed(
+            sender="bob@example.com",
+            body="REJECT numbers are wrong",
+            room_id="room-001",
+        )
+        with patch.object(self.hub, "_handle_room_reject", return_value=[{"type": "room_rejected"}]) as mock_reject:
+            result = self.hub._handle_human_email(parsed)
+        mock_reject.assert_called_once()
+        # Verify reason is extracted from body
+        _, kwargs = mock_reject.call_args
+        self.assertIn("numbers are wrong", mock_reject.call_args[0][2])
+
+
+# ── Phase 2: _parse_deadline helper ──────────────────────────────────────────
+
+class TestParseDeadline(unittest.TestCase):
+    def setUp(self):
+        self.hub = make_hub()
+
+    def test_iso_datetime(self):
+        ts = self.hub._parse_deadline("2030-01-01T00:00:00Z")
+        self.assertGreater(ts, time.time())
+
+    def test_relative_days(self):
+        ts = self.hub._parse_deadline("3 days")
+        self.assertAlmostEqual(ts, time.time() + 3 * 86400, delta=5)
+
+    def test_relative_weeks(self):
+        ts = self.hub._parse_deadline("2 weeks")
+        self.assertAlmostEqual(ts, time.time() + 14 * 86400, delta=5)
+
+    def test_relative_hours(self):
+        ts = self.hub._parse_deadline("48 hours")
+        self.assertAlmostEqual(ts, time.time() + 48 * 3600, delta=5)
+
+    def test_unparseable_defaults_to_7_days(self):
+        ts = self.hub._parse_deadline("sometime next year maybe")
+        self.assertAlmostEqual(ts, time.time() + 7 * 86400, delta=5)
+
+
+# ── Phase 2: _handle_create_room_command ─────────────────────────────────────
+
+class TestHandleCreateRoomCommand(unittest.TestCase):
+    def setUp(self):
+        self.hub = make_hub(
+            members={"alice": {"name": "Alice", "email": "alice@example.com"},
+                     "bob": {"name": "Bob", "email": "bob@example.com"}},
+            _email_to_member={"alice@example.com": "alice", "bob@example.com": "bob"},
+            _raw_config={"contacts": {}},
+        )
+
+    def test_missing_deadline_returns_info_requested(self):
+        """Missing deadline → info request sent back."""
+        parsed_req = {
+            "action": "create_room",
+            "topic": "Q3 Budget",
+            "participants": ["Bob"],
+            "deadline": "",
+        }
+        events = self.hub._handle_create_room_command(
+            "alice@example.com", "alice", "Alice", parsed_req
+        )
+        self.assertEqual(events[0]["type"], "member_info_requested")
+        self.assertIn("deadline", events[0]["missing"])
+
+    def test_unknown_participant_returns_info_requested(self):
+        """Unknown participant name → contact resolution failure."""
+        parsed_req = {
+            "action": "create_room",
+            "topic": "Topic",
+            "participants": ["UnknownPerson"],
+            "deadline": "3 days",
+        }
+        events = self.hub._handle_create_room_command(
+            "alice@example.com", "alice", "Alice", parsed_req
+        )
+        self.assertEqual(events[0]["type"], "member_info_requested")
+
+    def test_valid_request_dispatches_initiate_room(self):
+        """Valid create_room request triggers initiate_room."""
+        parsed_req = {
+            "action": "create_room",
+            "topic": "Q3 Budget",
+            "participants": ["Bob"],
+            "deadline": "7 days",
+            "initial_proposal": "Total: $100k",
+            "resolution_rules": "majority",
+        }
+        with patch.object(self.hub, "initiate_room", return_value="room-123") as mock_init:
+            events = self.hub._handle_create_room_command(
+                "alice@example.com", "alice", "Alice", parsed_req
+            )
+        mock_init.assert_called_once()
+        self.assertEqual(events[0]["type"], "room_created")
+        self.assertEqual(events[0]["room_id"], "room-123")
 
 
 if __name__ == "__main__":

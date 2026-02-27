@@ -10,9 +10,11 @@
 | Phase | Status | Description |
 |-------|--------|-------------|
 | Phase 1 | ✅ Complete | Email-based meeting time/location negotiation |
-| Phase 2 | 🗂️ Planned | "The Room" — async content negotiation with deadline |
+| Phase 2 | ✅ Implemented | "The Room" — async content negotiation with deadline |
 
 Phase 1 is fully implemented in `lib/` + `agent.py` + `hub_agent.py`. All modules are runnable.
+
+Phase 2 is implemented in the same Hub (`hub_agent.py`) via delegation to `RoomNegotiator`. No separate agent required. Run `python run_room_demo.py` to see the full flow.
 
 -----
 
@@ -69,17 +71,30 @@ If the recipient does not have an Agent, send a natural language email to the hu
 aimp/
 ├── lib/                          # Core libraries (canonical implementations)
 │   ├── __init__.py
+│   ├── transport.py              # BaseTransport ABC + EmailTransport (wraps EmailClient)
+│   │                             #   Agents program against BaseTransport; swap email↔Telegram/Slack
 │   ├── email_client.py           # IMAP/SMTP wrapper with OAuth2 & SSL support
-│   ├── protocol.py               # AIMP/0.1 protocol data model (AIMPSession, ProposalItem)
+│   │                             #   Phase 2: send_cfp_email, fetch_phase2_emails
+│   │                             #   ParsedEmail: +phase, +deadline, +room_id fields
+│   ├── protocol.py               # AIMP/0.1 protocol data model
+│   │                             #   Phase 1: AIMPSession, ProposalItem
+│   │                             #   Phase 2: AIMPRoom, Artifact
 │   ├── negotiator.py             # LLM decision engine (Negotiator, HubNegotiator)
-│   ├── session_store.py          # SQLite persistence (sessions + message_ids tables)
+│   ├── session_store.py          # SQLite persistence
+│   │                             #   Phase 1: sessions + sent_messages tables
+│   │                             #   Phase 2: rooms table (save_room/load_room/load_open_rooms)
 │   └── output.py                 # JSON stdout event emission (for OpenClaw)
 ├── agent.py                      # Standalone Agent (AIMPAgent)
 ├── hub_agent.py                  # Hub Agent (AIMPHubAgent extends AIMPAgent)
-│                                 #   - Identity recognition via email whitelist
-│                                 #   - God-view scheduling for internal members
-│                                 #   - create_agent() factory: auto-detects mode from config
-├── run_demo.py                   # 3-Agent Standalone Demo
+│                                 #   Phase 1: scheduling, invite codes, member whitelist
+│                                 #   Phase 2: RoomNegotiator, initiate_room, _handle_room_email,
+│                                 #            _finalize_room, _check_deadlines, veto flow
+│                                 #   create_agent() factory: auto-detects mode from config
+├── hub_prompts.py                # Phase 1 LLM prompt templates (scheduling)
+├── room_prompts.py               # Phase 2 LLM prompt templates (content negotiation)
+│                                 #   parse_amendment, aggregate_amendments, generate_minutes
+├── run_demo.py                   # Phase 1: 3-Agent Standalone Demo
+├── run_room_demo.py              # Phase 2: Room negotiation demo (in-memory, no real email)
 ├── openclaw-skill/
 │   ├── SKILL.md                  # OpenClaw runbook (hub + standalone)
 │   └── scripts/
@@ -282,28 +297,37 @@ class SessionStore:
     def load_message_ids(self, session_id) -> list[str]
 ```
 
-### 5.2 lib/email_client.py — IMAP/SMTP Wrapper
+### 5.2 lib/transport.py — Transport Abstraction
+
+Agents program against `BaseTransport`; the concrete implementation is `EmailTransport` (wraps `EmailClient`). Future transports (Telegram, Slack, …) only need to implement the same ABC.
 
 ```python
-class EmailClient:
-    def fetch_aimp_emails(self, since_minutes=60) -> list[ParsedEmail]
-        # IMAP SEARCH: UNSEEN SUBJECT "[AIMP:" within last N minutes
-        # Marks as read after parsing
-
+class BaseTransport(ABC):
+    def my_address(self) -> str                          # own address (e.g. email)
+    def fetch_aimp_emails(self, since_minutes=60)        # Phase 1 inbox
+    def fetch_all_unread_emails(self, since_minutes=60)  # Hub: all unread
+    def fetch_phase2_emails(self, since_minutes=60)      # Phase 2 Room inbox
     def send_aimp_email(self, to, session_id, version, subject_suffix,
                         body_text, protocol_json, references=None, in_reply_to=None) -> str
-        # Multipart: text/plain body + protocol.json attachment
-        # Returns Message-ID
-
+    def send_cfp_email(self, to, room_id, topic, deadline_iso,
+                       initial_proposal, resolution_rules, body_text, references=None) -> str
     def send_human_email(self, to, subject, body)
-        # Plain text, for fallback or owner notification
 
+class EmailTransport(BaseTransport):
+    """Delegates every call to EmailClient. Drop-in replacement for future transports."""
+```
+
+### 5.3 lib/email_client.py — IMAP/SMTP Wrapper (internal)
+
+`EmailClient` is no longer used directly by agents — it is wrapped by `EmailTransport`. Helpers remain importable from here:
+
+```python
 # Helpers
 def is_aimp_email(parsed: ParsedEmail) -> bool
 def extract_protocol_json(parsed: ParsedEmail) -> Optional[dict]
 ```
 
-### 5.3 lib/protocol.py — Session State
+### 5.4 lib/protocol.py — Session State
 
 ```python
 class AIMPSession:
@@ -325,7 +349,7 @@ class AIMPSession:
     def to_json(self) / from_json(cls, data)
 ```
 
-### 5.4 lib/negotiator.py — LLM Decision Engine
+### 5.5 lib/negotiator.py — LLM Decision Engine
 
 ```python
 class Negotiator:
@@ -343,7 +367,37 @@ class HubNegotiator:
         # God-view: aggregates all member preferences, returns consensus or candidates
 ```
 
-### 5.5 agent.py — AIMPAgent
+### 5.6 lib/protocol.py — Phase 2 Data Structures
+
+```python
+@dataclass
+class Artifact:
+    name: str            # e.g. "budget_v1.txt"
+    content_type: str    # "text/plain" | "application/pdf"
+    body_text: str       # text content
+    author: str          # submitter email
+    timestamp: float
+
+@dataclass
+class AIMPRoom:
+    room_id: str
+    topic: str
+    deadline: float                          # Unix timestamp
+    participants: list[str]
+    initiator: str
+    artifacts: dict[str, Artifact]           # {name: Artifact}
+    transcript: list[HistoryEntry]           # discussion log
+    status: str                              # "open" → "locked" → "finalized"
+    resolution_rules: str                    # "majority" | "consensus" | "initiator_decides"
+    accepted_by: list[str]                   # emails that sent ACCEPT
+
+    def is_past_deadline(self) -> bool
+    def all_accepted(self) -> bool
+    def add_to_transcript(self, from_agent, action, summary)
+    def to_json(self) / from_json(cls, data)
+```
+
+### 5.7 agent.py — AIMPAgent
 
 ```python
 class AIMPAgent:
@@ -354,11 +408,13 @@ class AIMPAgent:
     def poll(self) -> list[dict]        # One cycle: fetch emails, handle each
     def handle_email(self, parsed)      # Routes to _handle_aimp_email or _handle_human_email
     def initiate_meeting(self, topic, participant_names) -> str  # Returns session_id
+
+# Key attribute: self.transport (EmailTransport) — all I/O goes through this
 ```
 
 Session state is persisted to SQLite via `SessionStore` (not in-memory dict).
 
-### 5.6 hub_agent.py — AIMPHubAgent
+### 5.8 hub_agent.py — AIMPHubAgent
 
 ```python
 class AIMPHubAgent(AIMPAgent):
@@ -482,11 +538,11 @@ Usage:
 
 -----
 
-## IX. Phase 2 Roadmap — "The Room"
+## IX. Phase 2 — "The Room" (✅ Implemented)
 
-Phase 2 extends AIMP from scheduling (time/location) to **content negotiation** (documents, budgets, proposals) within a deadline-bounded async window.
+Phase 2 extends AIMP from scheduling (time/location) to **content negotiation** (documents, budgets, proposals) within a deadline-bounded async window. It is implemented as an extension of the existing Hub — no separate agent required.
 
-### Core Concept Shift
+### Core Concept
 
 | | Phase 1 | Phase 2 |
 |---|---|---|
@@ -494,25 +550,45 @@ Phase 2 extends AIMP from scheduling (time/location) to **content negotiation** 
 | Convergence trigger | Unanimous vote | All send ACCEPT, or deadline reached |
 | Hub role | Scheduler | Room Manager |
 | Output | Confirmed meeting time | Meeting minutes |
+| Status machine | negotiating → confirmed | open → locked → finalized |
 
-### Planned Extensions
+### Architecture Decision: Hub Extension (Not Separate Agent)
 
-**Protocol additions:**
-- `AIMPRoom` extends `AIMPSession`: adds `deadline: float`, `artifacts: dict`, `status: open→locked→finalized`
-- New action types: `PROPOSE`, `AMEND`, `ACCEPT`, `REJECT` (structured, not free-form)
-- New email headers: `X-AIMP-Phase: 2`, `X-AIMP-Deadline: <ISO8601>`
+Phase 2 logic lives in the same Hub email account via **delegation** to `RoomNegotiator`. Hub's `poll()` fetches `[AIMP:Room:]` emails first (before Phase 1 processing), then checks for expired deadlines.
 
-**New modules:**
-- `generate_meeting_minutes(room: AIMPRoom) -> str` in `Negotiator`
-- Deadline checker in `AIMPAgent.poll()` loop
-- Artifact attachment handling in `EmailClient`
+### How to Use
 
-**Files to modify (when Phase 2 starts):**
-- `lib/protocol.py` — add `AIMPRoom` dataclass
-- `lib/negotiator.py` — add `generate_meeting_minutes()`
-- `lib/email_client.py` — artifact attachment support
-- `agent.py` — deadline check in poll loop
-- `hub_agent.py` — Hub becomes Room Manager
+**Member initiates a Room** (email to Hub):
+```
+Subject: (anything)
+Body: 帮我发起一个协商室，和 Bob、Carol 讨论 Q3 预算方案，截止 3 天后。
+      初始提案：研发$60k，市场$25k，运营$15k
+```
+
+**Participants reply with actions:**
+- `ACCEPT` — agrees with current proposal
+- `AMEND + text` — proposes changes
+- `PROPOSE + text` — submits a new draft
+- `REJECT + reason` — blocks proposal
+
+**When finalized** (all ACCEPT or deadline), Hub sends meeting minutes to all participants. Participants can reply `CONFIRM` or `REJECT <reason>` for the veto flow.
+
+### Key Files
+
+| File | Role |
+|------|------|
+| `lib/protocol.py` | `Artifact` + `AIMPRoom` dataclasses |
+| `lib/session_store.py` | `rooms` table: `save_room`/`load_room`/`load_open_rooms` |
+| `lib/email_client.py` | `send_cfp_email`, `fetch_phase2_emails`, Phase 2 headers |
+| `room_prompts.py` | LLM templates: parse_amendment, aggregate, generate_minutes |
+| `hub_agent.py` | `RoomNegotiator` class + all room lifecycle methods |
+| `run_room_demo.py` | Integration demo (in-memory, no real email/LLM) |
+
+### Run the Demo
+
+```bash
+python run_room_demo.py
+```
 
 -----
 

@@ -81,19 +81,25 @@ def parse_member_request_user(member_name: str, subject: str, body: str) -> str:
 
 <json_schema>
 {{
-  "action": "schedule_meeting" or "unclear",
-  "topic": "meeting topic or null",
+  "action": "schedule_meeting" or "create_room" or "unclear",
+  "topic": "meeting or room topic, or null",
   "participants": ["name1", "name2"],
   "initiator_times": ["time preference 1", "time preference 2"],
   "initiator_locations": ["location preference 1"],
-  "missing": ["topic" and/or "participants" and/or "initiator_times" — list fields the member did NOT mention]
+  "missing": ["topic" and/or "participants" and/or "initiator_times" — list fields the member did NOT mention],
+  "deadline": "ISO8601 datetime string or relative time like '3 days' — only for create_room",
+  "initial_proposal": "the initial proposal text — only for create_room",
+  "resolution_rules": "majority" or "consensus" or "initiator_decides" — only for create_room, default majority"
 }}
 </json_schema>
 
 <rules>
-- action is "schedule_meeting" if the member wants to schedule a meeting/call, otherwise "unclear"
+- action is "schedule_meeting" if the member wants to schedule a meeting/call
+- action is "create_room" if the member wants to open a content negotiation room (e.g. to negotiate a document, budget, proposal, decision) with a deadline
+- action is "unclear" for anything else
 - participants should NOT include {member_name} themselves (they are the initiator)
 - initiator_times: any time preferences the initiator stated (e.g. "next Monday", "Friday afternoon")
 - initiator_locations: any location preferences stated (e.g. "online", "Beijing office")
 - missing: list fields that are absent or unclear; "initiator_times" and "initiator_locations" are OPTIONAL — only add them to missing if topic or participants are absent
+- For create_room: deadline is required; initial_proposal and resolution_rules are optional
 </rules>"""

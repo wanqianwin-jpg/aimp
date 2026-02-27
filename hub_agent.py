@@ -22,8 +22,8 @@ from typing import Optional
 
 import yaml
 
-from lib.email_client import EmailClient, ParsedEmail, is_aimp_email, extract_protocol_json
-from lib.protocol import AIMPSession
+from lib.email_client import ParsedEmail, is_aimp_email, extract_protocol_json
+from lib.protocol import AIMPSession, AIMPRoom, Artifact
 from lib.negotiator import Negotiator, make_llm_client, call_llm, extract_json
 from lib.session_store import SessionStore
 from lib.output import emit_event
@@ -33,6 +33,14 @@ from hub_prompts import (
     find_optimal_slot_user,
     parse_member_request_system,
     parse_member_request_user,
+)
+from room_prompts import (
+    parse_amendment_system,
+    parse_amendment_user,
+    aggregate_amendments_system,
+    aggregate_amendments_user,
+    generate_minutes_system,
+    generate_minutes_user,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,6 +151,109 @@ class HubNegotiator:
 
 
 # ──────────────────────────────────────────────────────
+# Room Negotiator: Phase 2 LLM helpers / Phase 2 LLM 工具
+# ──────────────────────────────────────────────────────
+
+class RoomNegotiator:
+    """
+    LLM helper for Phase 2 content negotiation rooms. /
+    Phase 2 内容协商 Room 的 LLM 工具。
+    """
+
+    def __init__(self, hub_name: str, hub_email: str, llm_config: dict):
+        self.hub_name = hub_name
+        self.hub_email = hub_email
+        self.client, self.model, self.provider = make_llm_client(llm_config)
+
+    def parse_amendment(self, member_name: str, body: str, current_artifacts: dict) -> dict:
+        """
+        Parse a participant's reply into a structured amendment action. /
+        将参与者的回复解析为结构化的修正动作。
+
+        Returns: {action: PROPOSE/AMEND/ACCEPT/REJECT, changes: str, reason: str, new_content: str|None}
+        """
+        system = parse_amendment_system(self.hub_name)
+        user = parse_amendment_user(member_name, body, current_artifacts)
+        try:
+            raw = call_llm(self.client, self.model, self.provider, system, user)
+            result = extract_json(raw)
+            logger.debug(f"RoomNegotiator.parse_amendment result: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"parse_amendment LLM failed: {e}")
+            return {
+                "action": "AMEND",
+                "changes": body[:200],
+                "reason": f"LLM parse failed: {e}",
+                "new_content": None,
+            }
+
+    def aggregate_amendments(self, room: AIMPRoom) -> dict:
+        """
+        Aggregate all amendments and return the current consolidated proposal. /
+        汇总所有修正，返回当前最优提案。
+
+        Returns: {current_proposal: str, conflicts: list, ready_to_finalize: bool, summary: str}
+        """
+        transcript_dicts = [h.to_dict() for h in room.transcript]
+        system = aggregate_amendments_system(self.hub_name)
+        user = aggregate_amendments_user(room.topic, transcript_dicts, room.deadline)
+        try:
+            raw = call_llm(self.client, self.model, self.provider, system, user)
+            result = extract_json(raw)
+            logger.debug(f"RoomNegotiator.aggregate_amendments result: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"aggregate_amendments LLM failed: {e}")
+            return {
+                "current_proposal": "(LLM aggregation failed)",
+                "conflicts": [str(e)],
+                "ready_to_finalize": False,
+                "summary": "Aggregation error",
+            }
+
+    def generate_meeting_minutes(self, room: AIMPRoom) -> str:
+        """
+        Generate Markdown meeting minutes from the room's transcript. /
+        从 Room 讨论记录生成 Markdown 格式会议纪要。
+
+        Returns: Markdown string
+        """
+        transcript_dicts = [h.to_dict() for h in room.transcript]
+        # Build resolution summary from latest aggregation
+        agg = self.aggregate_amendments(room)
+        resolution = agg.get("current_proposal", "(no proposal)")
+
+        system = generate_minutes_system(self.hub_name)
+        user = generate_minutes_user(room.topic, transcript_dicts, resolution, room.participants)
+        try:
+            raw = call_llm(self.client, self.model, self.provider, system, user)
+            logger.debug(f"RoomNegotiator.generate_meeting_minutes: generated {len(raw)} chars")
+            return raw.strip()
+        except Exception as e:
+            logger.error(f"generate_meeting_minutes LLM failed: {e}")
+            lines = [
+                f"# Meeting Minutes: {room.topic}",
+                "",
+                f"**Room ID:** {room.room_id}",
+                f"**Participants:** {', '.join(room.participants)}",
+                f"**Status:** {room.status}",
+                "",
+                "## Final Resolution",
+                "",
+                resolution,
+                "",
+                "## Discussion Log",
+                "",
+            ]
+            for entry in room.transcript:
+                lines.append(
+                    f"- [{entry.version}] {entry.from_agent} ({entry.action}): {entry.summary}"
+                )
+            return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────────────
 # AIMPHubAgent
 # ──────────────────────────────────────────────────────
 
@@ -224,6 +335,13 @@ class AIMPHubAgent(AIMPAgent):
 
         # Hub 专用 Negotiator
         self.hub_negotiator = HubNegotiator(
+            hub_name=self.hub_name,
+            hub_email=self.hub_email,
+            llm_config=config.get("llm", {}),
+        )
+
+        # Phase 2 Room Negotiator
+        self.room_negotiator = RoomNegotiator(
             hub_name=self.hub_name,
             hub_email=self.hub_email,
             llm_config=config.get("llm", {}),
@@ -390,7 +508,7 @@ class AIMPHubAgent(AIMPAgent):
                     f"你好 {member_name}，\n\n"
                     f"{self.hub_name} 正在协调会议「{topic}」的时间，你是参与者之一。\n\n"
                 )
-                self.email_client.send_human_email(
+                self.transport.send_human_email(
                     to=member_email,
                     subject=f"[AIMP:{session_id}] [请告知可用时间] {topic}",
                     body=personal_note + availability_body,
@@ -451,7 +569,7 @@ class AIMPHubAgent(AIMPAgent):
                     f"你好 {member_name}，\n\n"
                     f"{self.hub_name} 正在协调会议「{topic}」，你是内部参与者之一。\n\n"
                 )
-                self.email_client.send_human_email(
+                self.transport.send_human_email(
                     to=member_email,
                     subject=f"[AIMP:{session_id}] [请告知可用时间] {topic}",
                     body=personal_note + availability_body,
@@ -467,14 +585,33 @@ class AIMPHubAgent(AIMPAgent):
     def poll(self):
         """
         Hub 版 poll：
-          1. 先调父类 poll() 处理 AIMP 协议邮件（含人类回复，因为 subject 现在有 [AIMP:] 标记）
-          2. 再收取所有未读邮件，处理成员直接发来的指令（非 AIMP 协议邮件）
+          0. Phase 2 FIRST: 先处理 [AIMP:Room:] 邮件（标记已读，避免父类重复处理）
+          1. 父类 poll() 处理 AIMP 协议邮件（含人类回复）
+          2. 收取所有未读邮件，处理成员直接发来的指令
+          3. 检查 deadline 已过的 Room
         """
-        events = super().poll()
+        events = []
+
+        # ── Phase 2: Room emails FIRST (mark read before parent poll sees them) ──
+        try:
+            room_emails = self.transport.fetch_phase2_emails(since_minutes=60)
+            for parsed in room_emails:
+                if parsed.sender == self.agent_email:
+                    continue
+                try:
+                    evts = self._handle_room_email(parsed)
+                    events.extend(evts)
+                except Exception as e:
+                    logger.error(f"Failed to process Room email [{parsed.subject}]: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"Phase 2 room email fetch failed: {e}", exc_info=True)
+
+        # ── Phase 1 + member commands ────────────────────────────────────────
+        events.extend(super().poll())
 
         # 收取非 AIMP 邮件（成员指令等）
         try:
-            all_emails = self.email_client.fetch_all_unread_emails(since_minutes=60)
+            all_emails = self.transport.fetch_all_unread_emails(since_minutes=60)
             for parsed in all_emails:
                 # 跳过自己发的
                 if parsed.sender == self.agent_email:
@@ -502,6 +639,12 @@ class AIMPHubAgent(AIMPAgent):
                         logger.debug(f"Sent registration guidance to unknown sender: {parsed.sender}")
         except Exception as e:
             logger.error(f"Hub member email fetch failed: {e}", exc_info=True)
+
+        # ── Phase 2: deadline check ──────────────────────────────────────────
+        try:
+            self._check_deadlines()
+        except Exception as e:
+            logger.error(f"Deadline check failed: {e}", exc_info=True)
 
         return events
 
@@ -533,7 +676,7 @@ class AIMPHubAgent(AIMPAgent):
                 if not member_email:
                     logger.warning(f"member {mid} 没有配置邮箱，跳过通知")
                     continue
-                self.email_client.send_human_email(
+                self.transport.send_human_email(
                     to=member_email,
                     subject=f"[AIMP:{session_id}] [{self.hub_name}] {topic}",
                     body=body,
@@ -544,19 +687,28 @@ class AIMPHubAgent(AIMPAgent):
 
     def _handle_human_email(self, parsed: ParsedEmail) -> list[dict]:
         """
-        Override parent: auto-register participants who were invited by Hub and reply
-        for the first time. Any sender who is (a) not yet a Hub member, (b) present in
-        the session's participant list (meaning Hub sent them an invitation), and (c) not
-        an auto-reply/bounce address is auto-registered as a trusted member before the
-        vote is processed.
-        / 覆写父类：Hub 邀请过的参与者首次回复时自动注册。
-          满足以下条件则自动注册为 trusted member 再处理投票：
-          (a) 尚未是 Hub 成员；(b) 在 session 的 participants 列表中（Hub 发过邀请）；
-          (c) 不是自动回复/bounce 地址。
+        Override parent: (a) intercept Phase 2 Room veto replies, (b) auto-register
+        Hub-invited participants on first reply.
+        / 覆写父类：(a) 拦截 Phase 2 Room 的 veto 回复；(b) Hub 邀请过的参与者首次回复时自动注册。
         """
         sender = parsed.sender
-        session_id = parsed.session_id
 
+        # ── Phase 2 veto detection ────────────────────────────────────────────
+        if parsed.room_id:
+            room = self.store.load_room(parsed.room_id)
+            if room and room.status == "finalized":
+                body_stripped = parsed.body.strip()
+                body_upper = body_stripped.upper()
+                if body_upper.startswith("CONFIRM"):
+                    return self._handle_room_confirm(room, sender)
+                elif body_upper.startswith("REJECT"):
+                    reason = body_stripped[6:].strip()
+                    return self._handle_room_reject(room, sender, reason)
+            # Room email that isn't a veto — fall through to standard handling
+            # (e.g. an AMEND reply after finalization should be ignored gracefully)
+
+        # ── Auto-register Hub-invited participants on first reply ─────────────
+        session_id = parsed.session_id
         if (
             session_id
             and not self.identify_sender(sender)
@@ -568,7 +720,7 @@ class AIMPHubAgent(AIMPAgent):
                 self._register_trusted_user(sender, name, via_code=None)
                 logger.info(f"[{session_id}] Auto-registered Hub-invited participant: {name} ({sender})")
                 if self.notify_mode == "email":
-                    self.email_client.send_human_email(
+                    self.transport.send_human_email(
                         to=sender,
                         subject=f"[{self.hub_name}] 欢迎！你已自动注册",
                         body=(
@@ -607,10 +759,15 @@ class AIMPHubAgent(AIMPAgent):
         parsed = self._parse_member_request(member_name, body, subject=subject)
         action = parsed.get("action", "unclear")
 
+        if action == "create_room":
+            return self._handle_create_room_command(
+                from_email, member_id, member_name, parsed
+            )
+
         if action != "schedule_meeting":
             # Didn't understand the request — reply with guidance
             if self.notify_mode == "email":
-                self.email_client.send_human_email(
+                self.transport.send_human_email(
                     to=from_email,
                     subject=f"[{self.hub_name}] 收到你的消息，但我没明白",
                     body=(
@@ -620,6 +777,11 @@ class AIMPHubAgent(AIMPAgent):
                         f"  1. 会议主题\n"
                         f"  2. 参与者姓名\n"
                         f"  3. 你方便的时间 / 地点（可选，但推荐提供）\n\n"
+                        f"如果你想发起内容协商（如文档、方案、预算），请说明：\n"
+                        f"  1. 协商主题\n"
+                        f"  2. 参与者\n"
+                        f"  3. 截止时间\n"
+                        f"  4. 初始提案内容（可选）\n\n"
                         f"例如：「帮我约 Bob 和 Carol 本周五下午讨论季度计划，线上或北京办公室均可」\n\n"
                         f"— {self.hub_name}"
                     ),
@@ -641,7 +803,7 @@ class AIMPHubAgent(AIMPAgent):
             missing_cn = {"topic": "会议主题", "participants": "参与者", "initiator_times": "你的时间偏好", "initiator_locations": "你的地点偏好"}
             missing_str = "、".join(missing_cn.get(m, m) for m in missing)
             if self.notify_mode == "email":
-                self.email_client.send_human_email(
+                self.transport.send_human_email(
                     to=from_email,
                     subject=f"[{self.hub_name}] 需要补充信息",
                     body=(
@@ -659,7 +821,7 @@ class AIMPHubAgent(AIMPAgent):
         if unknown_names:
             unknown_str = "、".join(unknown_names)
             if self.notify_mode == "email":
-                self.email_client.send_human_email(
+                self.transport.send_human_email(
                     to=from_email,
                     subject=f"[{self.hub_name}] 找不到联系人邮箱",
                     body=(
@@ -678,7 +840,7 @@ class AIMPHubAgent(AIMPAgent):
         except Exception as e:
             logger.error(f"initiate_meeting failed: {e}", exc_info=True)
             if self.notify_mode == "email":
-                self.email_client.send_human_email(
+                self.transport.send_human_email(
                     to=from_email,
                     subject=f"[{self.hub_name}] 发起会议失败",
                     body=f"你好 {member_name}，\n\n发起会议时遇到问题，请稍后重试。\n\n错误：{e}\n\n— {self.hub_name}",
@@ -708,6 +870,475 @@ class AIMPHubAgent(AIMPAgent):
             "topic": topic,
             "participants": participant_names,
         }]
+
+    # ── Phase 2: create_room command handler ──────────────────────────────
+
+    def _handle_create_room_command(
+        self,
+        from_email: str,
+        member_id: str,
+        member_name: str,
+        parsed_request: dict,
+    ) -> list[dict]:
+        """
+        Handle a 'create_room' command from a member: validate, create AIMPRoom,
+        send CFP emails to participants.
+        / 处理成员的 create_room 指令：校验、创建 AIMPRoom、发 CFP 邮件给参与者。
+        """
+        topic = (parsed_request.get("topic") or "").strip()
+        participant_names: list[str] = parsed_request.get("participants") or []
+        deadline_str: str = (parsed_request.get("deadline") or "").strip()
+        initial_proposal: str = (parsed_request.get("initial_proposal") or "").strip()
+        resolution_rules: str = (parsed_request.get("resolution_rules") or "majority").strip()
+
+        # Validate required fields
+        missing = []
+        if not topic:
+            missing.append("topic")
+        if not participant_names:
+            missing.append("participants")
+        if not deadline_str:
+            missing.append("deadline")
+
+        if missing:
+            missing_cn = {"topic": "协商主题", "participants": "参与者", "deadline": "截止时间"}
+            missing_str = "、".join(missing_cn.get(m, m) for m in missing)
+            if self.notify_mode == "email":
+                self.transport.send_human_email(
+                    to=from_email,
+                    subject=f"[{self.hub_name}] 创建协商室需要更多信息",
+                    body=(
+                        f"你好 {member_name}，\n\n"
+                        f"要创建内容协商室，还需要以下信息：\n\n"
+                        f"  缺少：{missing_str}\n\n"
+                        f"请补充后重新发邮件给我。\n\n"
+                        f"— {self.hub_name}"
+                    ),
+                )
+            return [{"type": "member_info_requested", "member_id": member_id, "missing": missing}]
+
+        # Resolve deadline to Unix timestamp
+        deadline_ts = self._parse_deadline(deadline_str)
+        deadline_iso = self._ts_to_iso(deadline_ts)
+
+        # Resolve participant contacts
+        unknown_names = [n for n in participant_names if not self._find_participant_contact(n)]
+        if unknown_names:
+            unknown_str = "、".join(unknown_names)
+            if self.notify_mode == "email":
+                self.transport.send_human_email(
+                    to=from_email,
+                    subject=f"[{self.hub_name}] 找不到联系人邮箱",
+                    body=(
+                        f"你好 {member_name}，\n\n"
+                        f"以下参与者没有邮箱记录，无法发出协商邀请：\n\n"
+                        f"  {unknown_str}\n\n"
+                        f"请在邮件中直接提供他们的邮箱地址，或让管理员将其加入通讯录。\n\n"
+                        f"— {self.hub_name}"
+                    ),
+                )
+            return [{"type": "member_info_requested", "member_id": member_id, "missing": ["contact_emails"], "unknown": unknown_names}]
+
+        # Build participant email list
+        participant_emails = [from_email]
+        for name in participant_names:
+            contact = self._find_participant_contact(name)
+            if contact and contact["email"] not in participant_emails:
+                participant_emails.append(contact["email"])
+
+        try:
+            room_id = self.initiate_room(
+                topic=topic,
+                participants=participant_emails,
+                deadline=deadline_ts,
+                initial_proposal=initial_proposal,
+                initiator=from_email,
+                resolution_rules=resolution_rules,
+            )
+        except Exception as e:
+            logger.error(f"initiate_room failed: {e}", exc_info=True)
+            if self.notify_mode == "email":
+                self.transport.send_human_email(
+                    to=from_email,
+                    subject=f"[{self.hub_name}] 创建协商室失败",
+                    body=f"你好 {member_name}，\n\n创建协商室时遇到问题，请稍后重试。\n\n错误：{e}\n\n— {self.hub_name}",
+                )
+            return [{"type": "room_creation_failed", "member_id": member_id, "error": str(e)}]
+
+        logger.info(f"Room [{room_id}] created by {member_name} on topic '{topic}'")
+        return [{
+            "type": "room_created",
+            "room_id": room_id,
+            "member_id": member_id,
+            "topic": topic,
+            "participants": participant_emails,
+            "deadline": deadline_iso,
+        }]
+
+    # ── Phase 2: Room lifecycle ────────────────────────────────────────────
+
+    def initiate_room(
+        self,
+        topic: str,
+        participants: list[str],
+        deadline: float,
+        initial_proposal: str,
+        initiator: str,
+        resolution_rules: str = "majority",
+    ) -> str:
+        """
+        Create an AIMPRoom and send CFP emails to all participants. /
+        创建 AIMPRoom 并向所有参与者发送 CFP 邮件。
+
+        Returns: room_id
+        """
+        room_id = f"room-{int(time.time())}-{uuid.uuid4().hex[:6]}"
+        deadline_iso = self._ts_to_iso(deadline)
+
+        room = AIMPRoom(
+            room_id=room_id,
+            topic=topic,
+            deadline=deadline,
+            participants=participants,
+            initiator=initiator,
+            resolution_rules=resolution_rules,
+        )
+
+        # If initial_proposal is provided, add it as the first artifact
+        if initial_proposal:
+            artifact = Artifact(
+                name="initial_proposal.txt",
+                content_type="text/plain",
+                body_text=initial_proposal,
+                author=initiator,
+                timestamp=time.time(),
+            )
+            room.artifacts["initial_proposal.txt"] = artifact
+            room.add_to_transcript(
+                from_agent=initiator,
+                action="PROPOSE",
+                summary=f"Initial proposal submitted: {initial_proposal[:100]}{'...' if len(initial_proposal) > 100 else ''}",
+            )
+
+        self.store.save_room(room)
+
+        if self.notify_mode == "email":
+            initiator_name = self._email_to_name(initiator)
+            cfp_body = (
+                f"你好！\n\n"
+                f"{initiator_name} 邀请你参与内容协商：\n\n"
+                f"  主题：{topic}\n"
+                f"  截止时间：{deadline_iso}\n"
+                f"  决议规则：{resolution_rules}\n\n"
+            )
+            if initial_proposal:
+                cfp_body += (
+                    f"初始提案内容：\n"
+                    f"───────────────\n"
+                    f"{initial_proposal}\n"
+                    f"───────────────\n\n"
+                )
+            cfp_body += (
+                f"请回复此邮件表达你的意见：\n"
+                f"  - 发送 ACCEPT 表示接受当前提案\n"
+                f"  - 发送 AMEND + 修改建议 表示提出修改\n"
+                f"  - 发送 PROPOSE + 内容 提交新提案\n"
+                f"  - 发送 REJECT + 原因 表示反对\n\n"
+                f"协商将在截止时间 {deadline_iso} 自动结束并生成会议纪要。\n\n"
+                f"— {self.hub_name}"
+            )
+
+            # Send to all participants (including initiator)
+            self.transport.send_cfp_email(
+                to=participants,
+                room_id=room_id,
+                topic=topic,
+                deadline_iso=deadline_iso,
+                initial_proposal=initial_proposal,
+                resolution_rules=resolution_rules,
+                body_text=cfp_body,
+            )
+            logger.info(f"[{room_id}] CFP sent to {participants}")
+        else:
+            emit_event(
+                "room_created",
+                room_id=room_id,
+                topic=topic,
+                participants=participants,
+                deadline=deadline_iso,
+            )
+
+        return room_id
+
+    def _handle_room_email(self, parsed: ParsedEmail) -> list[dict]:
+        """
+        Process a Phase 2 Room email from a participant. /
+        处理来自参与者的 Phase 2 Room 邮件。
+
+        Flow: load room → parse amendment → add to transcript → check convergence.
+        """
+        room_id = parsed.room_id
+        if not room_id:
+            return []
+
+        room = self.store.load_room(room_id)
+        if not room:
+            logger.warning(f"Received Room email for unknown room_id={room_id}")
+            return []
+
+        if room.status != "open":
+            logger.info(f"[{room_id}] Room is {room.status}, ignoring late reply from {parsed.sender}")
+            return []
+
+        # Verify sender is a participant
+        sender = parsed.sender
+        if sender.lower() not in [p.lower() for p in room.participants]:
+            logger.warning(f"[{room_id}] Ignoring reply from non-participant {sender}")
+            return []
+
+        # Parse the amendment using LLM
+        sender_name = self._email_to_name(sender)
+        artifacts_dict = {name: a.to_dict() for name, a in room.artifacts.items()}
+        amendment = self.room_negotiator.parse_amendment(sender_name, parsed.body, artifacts_dict)
+
+        action = amendment.get("action", "AMEND").upper()
+        changes = amendment.get("changes", "")
+        reason = amendment.get("reason", "")
+        new_content = amendment.get("new_content")
+
+        # Update accepted_by list
+        if action == "ACCEPT":
+            if sender not in room.accepted_by:
+                room.accepted_by.append(sender)
+        elif action in ("PROPOSE", "AMEND") and new_content:
+            # Add/update artifact
+            artifact_name = f"proposal_{sender.split('@')[0]}_{int(time.time())}.txt"
+            room.artifacts[artifact_name] = Artifact(
+                name=artifact_name,
+                content_type="text/plain",
+                body_text=new_content,
+                author=sender,
+                timestamp=time.time(),
+            )
+
+        # Record in transcript
+        summary = changes or reason or parsed.body[:100]
+        room.add_to_transcript(
+            from_agent=sender,
+            action=action,
+            summary=f"{sender_name}: {summary}",
+        )
+        self.store.save_room(room)
+
+        logger.info(f"[{room_id}] Received {action} from {sender_name}")
+
+        # Check convergence
+        if room.all_accepted():
+            logger.info(f"[{room_id}] All participants accepted — finalizing room")
+            self._finalize_room(room)
+            return [{"type": "room_finalized", "room_id": room_id, "trigger": "all_accepted"}]
+
+        events = [{"type": "room_amendment_received", "room_id": room_id, "action": action, "sender": sender}]
+
+        # Broadcast status update to all participants
+        if self.notify_mode == "email":
+            self._broadcast_room_status(room, latest_action=action, latest_sender=sender_name)
+
+        return events
+
+    def _finalize_room(self, room: AIMPRoom) -> None:
+        """
+        Finalize the room: generate meeting minutes, update status, notify all participants. /
+        结束 Room：生成会议纪要、更新状态、通知所有参与者。
+        """
+        room.status = "finalized"
+        room.add_to_transcript(
+            from_agent=self.hub_email,
+            action="FINALIZED",
+            summary=f"Room finalized. Trigger: {'all_accepted' if room.all_accepted() else 'deadline_expired'}",
+        )
+
+        # Generate meeting minutes
+        minutes = self.room_negotiator.generate_meeting_minutes(room)
+        self.store.save_room(room)
+
+        if self.notify_mode == "email":
+            deadline_iso = self._ts_to_iso(room.deadline)
+            body = (
+                f"📋 **会议纪要** — {room.topic}\n\n"
+                f"协商已结束（截止时间：{deadline_iso}）。\n\n"
+                f"{'─' * 40}\n\n"
+                f"{minutes}\n\n"
+                f"{'─' * 40}\n\n"
+                f"如需确认或否决此纪要，请回复：\n"
+                f"  - CONFIRM  （接受纪要）\n"
+                f"  - REJECT <原因>  （否决纪要，发起方将重新决定）\n\n"
+                f"— {self.hub_name}"
+            )
+            for participant in room.participants:
+                self.transport.send_human_email(
+                    to=participant,
+                    subject=f"[AIMP:Room:{room.room_id}] [会议纪要] {room.topic}",
+                    body=body,
+                )
+            logger.info(f"[{room.room_id}] Meeting minutes sent to {room.participants}")
+        else:
+            emit_event(
+                "room_finalized",
+                room_id=room.room_id,
+                topic=room.topic,
+                minutes=minutes,
+                participants=room.participants,
+            )
+
+    def _check_deadlines(self) -> None:
+        """
+        Check all open rooms and finalize any that have passed their deadline. /
+        检查所有开放的 Room，对已过截止时间的 Room 执行收尾。
+        """
+        open_rooms = self.store.load_open_rooms()
+        for room in open_rooms:
+            if room.is_past_deadline():
+                logger.info(f"[{room.room_id}] Deadline passed — finalizing room '{room.topic}'")
+                try:
+                    self._finalize_room(room)
+                except Exception as e:
+                    logger.error(f"[{room.room_id}] Failed to finalize room: {e}", exc_info=True)
+
+    def _handle_room_confirm(self, room: AIMPRoom, sender: str) -> list[dict]:
+        """
+        Handle a CONFIRM veto reply for a finalized room. /
+        处理已收尾 Room 的 CONFIRM veto 回复。
+        """
+        if sender not in room.accepted_by:
+            room.accepted_by.append(sender)
+        room.add_to_transcript(
+            from_agent=sender,
+            action="CONFIRM",
+            summary=f"{self._email_to_name(sender)} confirmed the meeting minutes.",
+        )
+        self.store.save_room(room)
+
+        logger.info(f"[{room.room_id}] CONFIRM from {sender}")
+        if self.notify_mode == "email":
+            self.transport.send_human_email(
+                to=sender,
+                subject=f"[{self.hub_name}] 确认收到",
+                body=(
+                    f"你好！\n\n"
+                    f"已收到你对「{room.topic}」会议纪要的确认。\n\n"
+                    f"— {self.hub_name}"
+                ),
+            )
+        return [{"type": "room_confirmed", "room_id": room.room_id, "sender": sender}]
+
+    def _handle_room_reject(self, room: AIMPRoom, sender: str, reason: str) -> list[dict]:
+        """
+        Handle a REJECT veto reply: escalate to initiator for final decision. /
+        处理 REJECT veto 回复：升级给发起人做最终决定。
+        """
+        room.add_to_transcript(
+            from_agent=sender,
+            action="REJECT",
+            summary=f"{self._email_to_name(sender)} rejected the minutes. Reason: {reason}",
+        )
+        self.store.save_room(room)
+
+        logger.info(f"[{room.room_id}] REJECT from {sender}: {reason}")
+        if self.notify_mode == "email":
+            self.transport.send_human_email(
+                to=room.initiator,
+                subject=f"[{self.hub_name}] [需要决策] {room.topic} 纪要被否决",
+                body=(
+                    f"你好！\n\n"
+                    f"参与者 {self._email_to_name(sender)} 否决了「{room.topic}」的会议纪要。\n\n"
+                    f"否决原因：{reason or '（未提供原因）'}\n\n"
+                    f"作为发起人，请你决定后续处理方式：\n"
+                    f"  1. 重新开启协商（回复 REOPEN）\n"
+                    f"  2. 坚持当前纪要（回复 KEEP）\n\n"
+                    f"— {self.hub_name}"
+                ),
+            )
+            self.transport.send_human_email(
+                to=sender,
+                subject=f"[{self.hub_name}] 否决已记录",
+                body=(
+                    f"你好！\n\n"
+                    f"已将你对「{room.topic}」纪要的否决意见转达给发起人，请等待后续通知。\n\n"
+                    f"— {self.hub_name}"
+                ),
+            )
+        return [{"type": "room_rejected", "room_id": room.room_id, "sender": sender, "reason": reason}]
+
+    def _broadcast_room_status(self, room: AIMPRoom, latest_action: str, latest_sender: str):
+        """
+        Send a brief status update to all participants after receiving an amendment. /
+        收到修正后向所有参与者发送简短状态更新。
+        """
+        accepted_count = len(room.accepted_by)
+        total = len(room.participants)
+        deadline_iso = self._ts_to_iso(room.deadline)
+
+        body = (
+            f"[协商室更新] {room.topic}\n\n"
+            f"{latest_sender} 发送了 {latest_action}。\n\n"
+            f"进度：{accepted_count}/{total} 人已 ACCEPT\n"
+            f"截止时间：{deadline_iso}\n\n"
+            f"回复 ACCEPT 同意当前提案，或继续发送 AMEND / PROPOSE 修改意见。\n\n"
+            f"— {self.hub_name}"
+        )
+        for participant in room.participants:
+            try:
+                self.transport.send_human_email(
+                    to=participant,
+                    subject=f"[AIMP:Room:{room.room_id}] [更新] {room.topic}",
+                    body=body,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send status update to {participant}: {e}")
+
+    # ── Deadline / ISO helpers ─────────────────────────────────────────────
+
+    def _parse_deadline(self, deadline_str: str) -> float:
+        """
+        Parse a deadline string to Unix timestamp. Supports ISO8601 and relative
+        expressions like '3 days', '1 week', '24 hours'.
+        / 将截止时间字符串解析为 Unix 时间戳。支持 ISO8601 和相对表达。
+        """
+        import re as _re
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+        # Try ISO8601 first
+        try:
+            parsed = _dt.fromisoformat(deadline_str.replace("Z", "+00:00"))
+            return parsed.timestamp()
+        except (ValueError, AttributeError):
+            pass
+
+        # Relative: "3 days", "2 weeks", "48 hours", "1 month"
+        m = _re.search(r"(\d+)\s*(day|week|hour|month)", deadline_str.lower())
+        if m:
+            n = int(m.group(1))
+            unit = m.group(2)
+            delta_map = {"day": 1, "week": 7, "hour": 1 / 24, "month": 30}
+            days = n * delta_map.get(unit, 1)
+            return time.time() + days * 86400
+
+        # Default: 7 days from now
+        logger.warning(f"Could not parse deadline '{deadline_str}', defaulting to 7 days")
+        return time.time() + 7 * 86400
+
+    def _ts_to_iso(self, ts: float) -> str:
+        """Convert Unix timestamp to ISO8601 string / Unix 时间戳转 ISO8601 字符串"""
+        from datetime import datetime as _dt, timezone as _tz
+        return _dt.fromtimestamp(ts, tz=_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _email_to_name(self, email: str) -> str:
+        """Resolve an email to a display name / 将邮箱解析为显示名称"""
+        member_id = self.identify_sender(email)
+        if member_id:
+            return self.members[member_id].get("name", member_id)
+        return email.split("@")[0].capitalize()
 
     # ── Stage-2 helper methods ─────────────────────────────────────────────
 
@@ -773,7 +1404,7 @@ class AIMPHubAgent(AIMPAgent):
                 f"你发起的会议「{session.topic}」已经开始协商。\n"
                 f"作为发起者，你也需要提交你的时间和地点偏好：\n\n"
             )
-            self.email_client.send_human_email(
+            self.transport.send_human_email(
                 to=from_email,
                 subject=f"[AIMP:{session.session_id}] [请投票] {session.topic}",
                 body=personal_note + body,
@@ -821,7 +1452,7 @@ class AIMPHubAgent(AIMPAgent):
             return
         self._replied_senders[from_email.lower()] = now
 
-        self.email_client.send_human_email(
+        self.transport.send_human_email(
             to=from_email,
             subject=f"[{self.hub_name}] 你好！如何使用本服务",
             body=(
@@ -858,7 +1489,7 @@ class AIMPHubAgent(AIMPAgent):
         """Validate invite code, register user, send welcome reply."""
         # Already a known member or trusted user?
         if self.identify_sender(from_email):
-            self.email_client.send_human_email(
+            self.transport.send_human_email(
                 to=from_email,
                 subject=f"[{self.hub_name}] 你已经注册过了",
                 body=(
@@ -873,7 +1504,7 @@ class AIMPHubAgent(AIMPAgent):
 
         valid_code = self._validate_invite_code(code)
         if not valid_code:
-            self.email_client.send_human_email(
+            self.transport.send_human_email(
                 to=from_email,
                 subject=f"[{self.hub_name}] 邀请码无效",
                 body=(
@@ -921,7 +1552,7 @@ class AIMPHubAgent(AIMPAgent):
         }
         hub_card_json = _json.dumps(hub_card, ensure_ascii=False, indent=2)
 
-        self.email_client.send_human_email(
+        self.transport.send_human_email(
             to=from_email,
             subject=f"[{self.hub_name}] 注册成功！欢迎使用",
             body=(

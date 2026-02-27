@@ -16,6 +16,9 @@ MAX_ROUNDS = 5
 
 VALID_ACTIONS = {"propose", "accept", "counter", "confirm", "escalate"}
 
+# Phase 2 Room actions / Phase 2 Room 动作
+ROOM_ACTIONS = {"PROPOSE", "AMEND", "ACCEPT", "REJECT"}
+
 
 # ──────────────────────────────────────────────────────
 # Data Structures / 数据结构
@@ -250,4 +253,119 @@ class AIMPSession:
         return (
             f"AIMPSession(id={self.session_id!r}, topic={self.topic!r}, "
             f"v={self._version}, status={self.status!r})"
+        )
+
+
+# ──────────────────────────────────────────────────────
+# Phase 2 Data Structures / Phase 2 数据结构
+# ──────────────────────────────────────────────────────
+
+@dataclass
+class Artifact:
+    """A content artifact submitted to a Room negotiation / Room 协商中提交的内容产物"""
+    name: str               # e.g. "budget_v1.txt"
+    content_type: str       # "text/plain" | "application/pdf"
+    body_text: str          # text content (PDF converted to text) / 文本内容（PDF 转文本）
+    author: str             # submitter email / 提交者邮箱
+    timestamp: float        # submission time / 提交时间
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "content_type": self.content_type,
+            "body_text": self.body_text,
+            "author": self.author,
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Artifact":
+        return cls(
+            name=d["name"],
+            content_type=d.get("content_type", "text/plain"),
+            body_text=d.get("body_text", ""),
+            author=d.get("author", ""),
+            timestamp=d.get("timestamp", 0.0),
+        )
+
+
+@dataclass
+class AIMPRoom:
+    """
+    Phase 2 Room: async content negotiation bounded by a deadline. /
+    Phase 2 Room：有截止时间的异步内容协商。
+
+    Status flow: open → locked → finalized
+    """
+    room_id: str
+    topic: str
+    deadline: float                             # Unix timestamp / Unix 时间戳
+    participants: list[str]
+    initiator: str
+    artifacts: dict[str, Artifact] = field(default_factory=dict)       # {name: Artifact}
+    transcript: list[HistoryEntry] = field(default_factory=list)        # discussion log / 讨论记录
+    status: str = "open"                        # open → locked → finalized
+    created_at: float = field(default_factory=time.time)
+    resolution_rules: str = "majority"          # "majority" | "consensus" | "initiator_decides"
+    accepted_by: list[str] = field(default_factory=list)                # emails that sent ACCEPT
+
+    def to_json(self) -> dict:
+        return {
+            "room_id": self.room_id,
+            "topic": self.topic,
+            "deadline": self.deadline,
+            "participants": list(self.participants),
+            "initiator": self.initiator,
+            "artifacts": {name: a.to_dict() for name, a in self.artifacts.items()},
+            "transcript": [h.to_dict() for h in self.transcript],
+            "status": self.status,
+            "created_at": self.created_at,
+            "resolution_rules": self.resolution_rules,
+            "accepted_by": list(self.accepted_by),
+        }
+
+    @classmethod
+    def from_json(cls, data: dict) -> "AIMPRoom":
+        room = cls.__new__(cls)
+        room.room_id = data["room_id"]
+        room.topic = data.get("topic", "")
+        room.deadline = data.get("deadline", 0.0)
+        room.participants = list(data.get("participants", []))
+        room.initiator = data.get("initiator", "")
+        room.artifacts = {
+            name: Artifact.from_dict(a)
+            for name, a in data.get("artifacts", {}).items()
+        }
+        room.transcript = [HistoryEntry.from_dict(h) for h in data.get("transcript", [])]
+        room.status = data.get("status", "open")
+        room.created_at = data.get("created_at", time.time())
+        room.resolution_rules = data.get("resolution_rules", "majority")
+        room.accepted_by = list(data.get("accepted_by", []))
+        return room
+
+    def is_past_deadline(self) -> bool:
+        """Check if the negotiation deadline has passed / 检查协商截止时间是否已过"""
+        return time.time() > self.deadline
+
+    def all_accepted(self) -> bool:
+        """Check if all participants have sent ACCEPT / 检查所有参与者是否都已发出 ACCEPT"""
+        if not self.participants:
+            return False
+        return all(p in self.accepted_by for p in self.participants)
+
+    def add_to_transcript(self, from_agent: str, action: str, summary: str):
+        """Append an entry to the discussion transcript / 向讨论记录追加一条"""
+        version = len(self.transcript) + 1
+        entry = HistoryEntry(
+            version=version,
+            from_agent=from_agent,
+            action=action,
+            summary=summary,
+        )
+        self.transcript.append(entry)
+
+    def __repr__(self):
+        return (
+            f"AIMPRoom(id={self.room_id!r}, topic={self.topic!r}, "
+            f"status={self.status!r}, participants={len(self.participants)})"
         )

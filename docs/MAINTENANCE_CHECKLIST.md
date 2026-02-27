@@ -10,9 +10,9 @@ Use this checklist when releasing new versions or updating documentation.
 ## 2. Content Synchronization
 - [ ] **README vs README_zh**: Ensure Chinese docs reflect the latest English changes.
 - [ ] **Installation Instructions**: Verify commands in `README.md` match `SKILL.md`.
-- [ ] **Feature List**: If a new feature (like Hub Mode) is added, ensure it's in:
-    - [ ] `README.md`
-    - [ ] `CLAUDE.md`
+- [ ] **Feature List**: If a new feature (like Hub Mode or Phase 2 Room) is added, ensure it's in:
+    - [ ] `README.md` / `README_zh.md`
+    - [ ] `CLAUDE.md` / `CLAUDE_zh.md`
     - [ ] `openclaw-skill/SKILL.md`
 
 ## 3. "Fork" & Repository Checks
@@ -27,4 +27,5 @@ Use this checklist when releasing new versions or updating documentation.
 
 ## 5. Technical Verification
 - [ ] **Commands**: Copy-paste installation commands into a clean terminal to verify they run.
+- [ ] **Demos**: Run `python run_demo.py` and `python run_room_demo.py` to ensure core logic is intact.
 - [ ] **Config Examples**: Ensure `references/config-example.yaml` matches the current code structure.
