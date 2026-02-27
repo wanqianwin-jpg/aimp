@@ -145,7 +145,7 @@ def interactive_hub_mode():
     provider, model, api_key_env, base_url = ask_llm_config()
 
     print("\n--- 成员配置 ---")
-    print("每个成员需要姓名、邮箱和会议偏好。第一个成员默认为 admin。\n")
+    print("每个成员需要姓名、邮箱。第一个成员默认为 admin。\n")
 
     members = {}
     member_count = int(get_input("成员数量", "2"))
@@ -157,25 +157,10 @@ def interactive_hub_mode():
         email = get_input("成员邮箱 (用于接收通知和发送指令)")
         role = "admin" if i == 0 else "member"
 
-        print(f"  会议偏好（{name}）：")
-        preferred_times = get_input(
-            "  偏好时间 (逗号分隔)", "weekday mornings 9:00-12:00", allow_empty=True
-        )
-        blocked_times = get_input("  屏蔽时间 (逗号分隔，可留空)", "", allow_empty=True)
-        preferred_locations = get_input(
-            "  偏好地点 (逗号分隔)", "Zoom,腾讯会议", allow_empty=True
-        )
-
         members[mid] = {
             "name": name,
             "email": email,
             "role": role,
-            "preferences": {
-                "preferred_times": split_list(preferred_times),
-                "blocked_times": split_list(blocked_times),
-                "preferred_locations": split_list(preferred_locations),
-                "auto_accept": True,
-            },
         }
 
     print("\n--- 外部联系人（可选，Hub 成员以外的人）---")
@@ -360,12 +345,6 @@ def main():
                         {
                             "name": args.owner_name,
                             "email": args.owner_email,
-                            "preferences": {
-                                "preferred_times": split_list(args.preferred_times),
-                                "blocked_times": split_list(args.blocked_times),
-                                "preferred_locations": split_list(args.preferred_locations),
-                                "auto_accept": True,
-                            }
                         }
                     ]
                 },

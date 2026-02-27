@@ -5,8 +5,13 @@
 ![AI-Native](https://img.shields.io/badge/AI-Native-green)
 ![License](https://img.shields.io/badge/License-MIT-purple)
 
-> **AIMP (AI Meeting Protocol)** is a minimalist AI Agent meeting negotiation protocol.
-> Agents negotiate meeting times and locations via email and reach consensus automatically.
+> **AIMP (AI Meeting Protocol)** —— A meeting negotiation protocol with a Cyberpunk aesthetic.
+>
+> Where **Ancient Infrastructure (Email)** meets **New Technology (LLM)**, forging a new **AI-Native** tool.
+> It's not just a protocol; it's a powerful **Cyberware (Skill)** for **OpenClaw**.
+>
+> *   **Cyber-Fusion**: Utilizing the ancient email network as synapses, requiring no installation from the other party.
+> *   **Cyberware Enhancement**: Install a "Diplomat" implant for your Agent, allowing it to negotiate with other Agents or humans in the background.
 >
 > **Hub Mode** (v0.2): One Agent serves a whole family or team. Internal members get instant scheduling via "god view" — no email rounds needed. External contacts still use standard email negotiation.
 >
@@ -34,20 +39,20 @@ Grab the code from the location that's fastest for you.
 
 ## 🚀 How to Use (OpenClaw Skill)
 
-AIMP works seamlessly as an **OpenClaw Skill**. If you are using **OpenClaw (龙虾人)**, simply copy and paste the following prompt to let it handle everything for you:
+AIMP works seamlessly as an **OpenClaw Skill**. If you are using **OpenClaw**, simply copy and paste the following prompt to implant this cyberware:
 
-> **[OpenClaw User? Copy This]**
+> **[OpenClaw Implant Command]**
 > "Please help me install AIMP meeting skill from `https://gitee.com/wanqianwin/aimp` or `https://github.com/wanqianwin-jpg/aimp`. 
-> 1. Clone the repo and run `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`. 
-> 2. Run `python3 openclaw-skill/scripts/setup_config.py --interactive` to help me configure my email. 
-> 3. Once done, let's schedule a test meeting!"
+> 1. Clone the neural synapse repo and run `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`. 
+> 2. Run `python3 openclaw-skill/scripts/setup_config.py --interactive` to help me configure the comms protocol. 
+> 3. Once installed, let's schedule a test meeting!"
 
 ### 🐳 Docker & Container Friendly
 The installation script (`install.py`) automatically detects container environments. If `OPENCLAW_ENV` or `DOCKER_ENV` is set, it switches to `requirements_minimal.txt` for a fast, lightweight, and permission-safe installation.
 
 ### 1. Install Skill manually
 
-Add this repository as a Skill to your OpenClaw:
+Add this repository as a Cyberware to your OpenClaw:
 
 ```bash
 # Assuming you have OpenClaw installed
@@ -62,7 +67,7 @@ Enter in OpenClaw:
 OpenClaw will guide you to enter email information, preferences, and complete the configuration automatically.
 
 > **💡 Note on LLM Configuration**:
-> AIMP is a **Background Agent** that monitors emails and makes decisions independently (e.g., deciding which meeting time is best) even when you're not actively using it. Therefore, it needs its own LLM access.
+> AIMP is a **Background Agent** that monitors emails and makes decisions independently (e.g., deciding which meeting time is best) even when you're not actively using it. Therefore, it needs its own LLM computing power.
 > *   **Good News**: If you have already configured `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in your environment, the setup script will automatically detect and reuse them.
 
 ### 3. Schedule a Meeting

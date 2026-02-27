@@ -31,6 +31,7 @@ class ParsedEmail:
     references: list[str]
     session_id: Optional[str] = None
     raw_date: Optional[str] = None
+    sender_name: Optional[str] = None  # Display name from From header (e.g. "Alice Wang")
 
 
 def _decode_str(s) -> str:
@@ -233,6 +234,9 @@ class EmailClient:
         import re
         sender_match = re.search(r"[\w.+\-]+@[\w.\-]+", sender)
         sender_addr = sender_match.group(0) if sender_match else sender
+        # Extract display name: "Alice Wang <alice@gmail.com>" → "Alice Wang"
+        name_match = re.match(r'^([^<@\n"]+?)\s*<', sender)
+        sender_name = name_match.group(1).strip() if name_match else None
 
         message_id = msg.get("Message-ID", "").strip()
         references_raw = msg.get("References", "") or ""
@@ -269,6 +273,7 @@ class EmailClient:
             message_id=message_id,
             subject=subject,
             sender=sender_addr,
+            sender_name=sender_name,
             recipients=recipients,
             body=body,
             attachments=attachments,

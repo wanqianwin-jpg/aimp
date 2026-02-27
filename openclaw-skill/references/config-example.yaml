@@ -66,6 +66,17 @@
 #     agent_email: ""
 #     has_agent: false
 #
+# # ── 邀请码（可选）：让非成员自助注册 ──
+# # 发邮件给 Hub，subject 含 [AIMP-INVITE:码] 即可注册
+# invite_codes:
+#   - code: "welcome-2026"              # 你分配给对方的码（可发微信/短信/邮件告知）
+#     expires: "2026-12-31"             # 可选，过期日期
+#     max_uses: 3                       # 可选，0 = 不限次数
+#     used: 0                           # 自动更新，勿手改
+#
+# # ── 已注册用户（Hub 自动维护，勿手改）──
+# trusted_users: {}
+#
 # llm:
 #   provider: "anthropic"                # anthropic | openai | local
 #   model: "claude-sonnet-4-5-20250514"

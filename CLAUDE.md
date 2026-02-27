@@ -5,9 +5,20 @@
 
 -----
 
+## Current Status
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1 | ✅ Complete | Email-based meeting time/location negotiation |
+| Phase 2 | 🗂️ Planned | "The Room" — async content negotiation with deadline |
+
+Phase 1 is fully implemented in `lib/` + `agent.py` + `hub_agent.py`. All modules are runnable.
+
+-----
+
 ## I. Architecture
 
-### Standalone Mode (original)
+### Standalone Mode
 
 ```
 Alice (Human) ──Preferences──→ Agent-A ──Email──→ ┐
@@ -17,25 +28,34 @@ Carol (Human) ──Preferences──→ Agent-C ──Email──→ ┘
                    └── Result Notification (Email/Terminal) ←──┘
 ```
 
-### Hub Mode (v0.2, recommended)
+### Hub Mode (recommended) — "Hub Skill" paradigm
 
 ```
-Alice ─┐
-Bob   ─┼──→ HubAgent (1 email) ──Email──→ External contacts / External Agents
-Carol ─┘         │
-                 │ (internal: no email, direct LLM scheduling)
-                 ↓
-         Notify all members instantly
+New user ──[AIMP-INVITE:code]──→ ┐
+Member   ──"schedule meeting"──→ ├─ HubAgent (1 email address) ──→ External contacts / Agents
+                                 │
+                         (internal: direct LLM scheduling)
+                                 ↓
+                     Notifies all participants
 ```
 
-Hub Mode Core Workflow:
-1. Alice tells Hub: "Schedule a meeting with Bob"
-2. Hub identifies Alice by `From:` email (whitelist check)
-3. Hub reads both Alice's and Bob's preferences directly
-4. 1 LLM call → finds optimal time/location
-5. Hub notifies both Alice and Bob instantly (no email rounds needed)
+Hub is a **single deployable skill** — users only interact via email. No agent required on the user's side.
 
-For external contacts: Hub still sends AIMP/natural-language email and negotiates normally.
+**Full email lifecycle:**
+
+| Stage | Actor | Action | Email subject pattern |
+|-------|-------|--------|----------------------|
+| 0. Registration | Admin | Create invite codes in config.yaml | — |
+| 1. Self-registration | New user | Email Hub with invite code | `[AIMP-INVITE:code]` |
+| 1. Reply | Hub | Validates code, registers user, welcome email + hub-card JSON | — |
+| 2. Meeting request | Member | Natural-language meeting request | (any) |
+| 2. If incomplete | Hub | Reply asking for missing info (topic / participants / availability) | — |
+| 3. Invitations sent | Hub | LLM-parsed → auto-dispatch `initiate_meeting()` | `[AIMP:session_id]` |
+| 3. Initiator vote | Hub | Sends initiator a vote invitation (they are also a voter) | `[AIMP:session_id]` |
+| 4. Voting | All | Reply with time/location preferences | `[AIMP:session_id]` |
+| 5. Consensus | Hub | Notifies all participants of confirmed time/location | — |
+
+**God-view design note:** Config `preferences` are used as *hints* to generate initial candidate time/location options only. Actual per-meeting votes always come from each participant's individual email reply. Static config cannot represent real-time availability.
 
 **Key Design: Fallback Compatibility**
 
@@ -47,29 +67,41 @@ If the recipient does not have an Agent, send a natural language email to the hu
 
 ```
 aimp/
-├── lib/
-│   ├── email_client.py       # IMAP/SMTP Wrapper
-│   ├── protocol.py           # AIMP/0.1 Protocol Data Model
-│   ├── negotiator.py         # LLM Decision Engine (standalone + hub negotiators)
-│   ├── session_store.py      # SQLite Session Persistence
-│   └── output.py             # JSON stdout events
-├── agent.py                  # Standalone Agent (1 person, 1 Agent)
-├── hub_agent.py              # Hub Agent (1 Agent, multiple members) ← NEW
-│                             #   - AIMPHubAgent: identity recognition + god-view scheduling
-│                             #   - HubNegotiator: multi-preference optimization
-│                             #   - create_agent(): factory, auto-detects mode from config
-├── run_demo.py               # 3-Agent Standalone Demo
+├── lib/                          # Core libraries (canonical implementations)
+│   ├── __init__.py
+│   ├── email_client.py           # IMAP/SMTP wrapper with OAuth2 & SSL support
+│   ├── protocol.py               # AIMP/0.1 protocol data model (AIMPSession, ProposalItem)
+│   ├── negotiator.py             # LLM decision engine (Negotiator, HubNegotiator)
+│   ├── session_store.py          # SQLite persistence (sessions + message_ids tables)
+│   └── output.py                 # JSON stdout event emission (for OpenClaw)
+├── agent.py                      # Standalone Agent (AIMPAgent)
+├── hub_agent.py                  # Hub Agent (AIMPHubAgent extends AIMPAgent)
+│                                 #   - Identity recognition via email whitelist
+│                                 #   - God-view scheduling for internal members
+│                                 #   - create_agent() factory: auto-detects mode from config
+├── run_demo.py                   # 3-Agent Standalone Demo
 ├── openclaw-skill/
-│   ├── SKILL.md              # OpenClaw runbook (hub + standalone)
+│   ├── SKILL.md                  # OpenClaw runbook (hub + standalone)
 │   └── scripts/
-│       ├── initiate.py       # Uses create_agent(), supports --initiator for hub
-│       ├── poll.py           # Uses create_agent()
-│       ├── respond.py        # Hub-aware config loading
-│       ├── status.py         # Unchanged
-│       └── setup_config.py   # Hub wizard + standalone wizard
+│       ├── initiate.py           # Uses create_agent(), supports --initiator for hub
+│       ├── poll.py               # Uses create_agent()
+│       ├── respond.py            # Hub-aware config loading
+│       ├── status.py
+│       └── setup_config.py       # Hub wizard + standalone wizard
+├── config/
+│   ├── agent_a.yaml
+│   ├── agent_b.yaml
+│   └── agent_c.yaml
+├── docs/
+│   ├── VISION_ARTICLE.md         # Conceptual article: async AI time paradigm
+│   ├── PHASE2_ROOM_ARCHITECTURE.md  # Phase 2 design doc
+│   ├── STYLE_GUIDE.md
+│   └── MAINTENANCE_CHECKLIST.md
 └── references/
-    └── config-example.yaml   # Both mode examples
+    └── config-example.yaml       # Both mode config examples
 ```
+
+Root-level `email_client.py`, `negotiator.py`, `protocol.py` are legacy copies — use `lib/` versions.
 
 -----
 
@@ -114,6 +146,15 @@ contacts:                        # External (outside Hub)
     human_email: "dave@gmail.com"
     has_agent: false
 
+# Invite code self-registration system
+invite_codes:
+  - code: "welcome-2026"
+    expires: "2026-12-31"
+    max_uses: 3
+    used: 0              # auto-updated by Hub, do not edit manually
+
+trusted_users: {}        # auto-populated when users register via invite code
+
 llm:
   provider: "local"              # Ollama (free, always-on machine)
   model: "llama3"
@@ -148,7 +189,7 @@ contacts:
 
 llm:
   provider: "anthropic"
-  model: "claude-sonnet-4-5-20250514"
+  model: "claude-sonnet-4-6"
   api_key_env: "ANTHROPIC_API_KEY"
 ```
 
@@ -225,232 +266,156 @@ llm:
 
 -----
 
-## V. Core Module Implementation
+## V. Core Module Reference
 
-### 5.1 email_client.py
+### 5.1 lib/session_store.py — SQLite Persistence
 
-Wraps IMAP/SMTP, provides:
+Two tables: `sessions` (JSON-serialized `AIMPSession`) and `sent_messages` (email threading).
+
+```python
+class SessionStore:
+    def save(self, session: AIMPSession)
+    def load(self, session_id: str) -> AIMPSession
+    def load_active(self) -> list[AIMPSession]      # status == "negotiating"
+    def delete(self, session_id: str)
+    def save_message_id(self, session_id, msg_id)
+    def load_message_ids(self, session_id) -> list[str]
+```
+
+### 5.2 lib/email_client.py — IMAP/SMTP Wrapper
 
 ```python
 class EmailClient:
-    def __init__(self, imap_server, smtp_server, email, password): ...
-    
-    def fetch_aimp_emails(self, since_minutes=5) -> list[Email]:
-        """Search unread emails with Subject containing [AIMP:, return parsed list"""
-        # IMAP SEARCH: UNSEEN SUBJECT "[AIMP:"
-        # Parse body and JSON attachment
-        ...
-    
-    def send_aimp_email(self, to: list[str], session_id: str, 
-                         version: int, body_text: str, 
-                         protocol_json: dict, 
-                         references: list[str] = None): 
-        """Send AIMP protocol email"""
-        # Construct multipart email: text/plain + application/json attachment
-        # Set Subject: [AIMP:{session_id}] v{version}
-        # Set References header
-        ...
-    
-    def send_human_email(self, to: str, subject: str, body: str):
-        """Send normal email to human (fallback or notification)"""
-        ...
+    def fetch_aimp_emails(self, since_minutes=60) -> list[ParsedEmail]
+        # IMAP SEARCH: UNSEEN SUBJECT "[AIMP:" within last N minutes
+        # Marks as read after parsing
+
+    def send_aimp_email(self, to, session_id, version, subject_suffix,
+                        body_text, protocol_json, references=None, in_reply_to=None) -> str
+        # Multipart: text/plain body + protocol.json attachment
+        # Returns Message-ID
+
+    def send_human_email(self, to, subject, body)
+        # Plain text, for fallback or owner notification
+
+# Helpers
+def is_aimp_email(parsed: ParsedEmail) -> bool
+def extract_protocol_json(parsed: ParsedEmail) -> Optional[dict]
 ```
 
-### 5.2 protocol.py
-
-Protocol data parsing and state management:
+### 5.3 lib/protocol.py — Session State
 
 ```python
 class AIMPSession:
-    def __init__(self, session_id: str, topic: str, participants: list[str]): ...
-    
-    @classmethod
-    def from_json(cls, data: dict) -> "AIMPSession": 
-        """Parse from protocol.json"""
-        ...
-    
-    def to_json(self) -> dict:
-        """Export to protocol.json"""
-        ...
-    
-    def apply_vote(self, voter: str, item: str, choice: str):
-        """Record vote"""
-        ...
-    
-    def add_option(self, item: str, option: str):
-        """Add new option (for counter)"""
-        ...
-    
-    def check_consensus(self) -> dict:
-        """Check if consensus reached for each topic, return {item: resolved_value | None}"""
-        ...
-    
-    def is_fully_resolved(self) -> bool:
-        """Are all topics resolved?"""
-        ...
-    
-    @property
-    def version(self) -> int: ...
-    
-    def next_version(self) -> int:
-        return self.version + 1
+    session_id: str
+    topic: str
+    participants: list[str]
+    initiator: str
+    _version: int
+    proposals: dict[str, ProposalItem]  # {"time": ..., "location": ...}
+    history: list[HistoryEntry]
+    status: str  # "negotiating" | "confirmed" | "escalated"
+    created_at: float
+
+    def apply_vote(self, voter, item, choice)
+    def add_option(self, item, option)
+    def check_consensus(self) -> dict   # {item: resolved_value | None}
+    def is_fully_resolved(self) -> bool
+    def bump_version(self)
+    def to_json(self) / from_json(cls, data)
 ```
 
-### 5.3 negotiator.py
-
-Calls LLM for decision making (Core Intelligence):
+### 5.4 lib/negotiator.py — LLM Decision Engine
 
 ```python
 class Negotiator:
-    def __init__(self, preferences: dict, llm_client): ...
-    
-    def decide(self, session: AIMPSession) -> tuple[str, dict]:
-        """
-        Input: Current session state
-        Output: (action, details)
-        
-        Logic:
-        1. Send session state + own preferences to LLM
-        2. Let LLM decide:
-           - Completely matches preferences → ("accept", {votes: {...}})
-           - Partially matches → ("counter", {votes: {...}, new_options: {...}})
-           - Cannot match → ("escalate", {reason: "..."})
-        3. Return result
-        """
-        ...
-    
-    def parse_human_reply(self, email_body: str, session: AIMPSession) -> tuple[str, dict]:
-        """
-        Use LLM to parse human free-text reply, extract voting intent.
-        Used for fallback mode (when recipient has no Agent).
-        """
-        ...
-    
-    def generate_human_readable_summary(self, session: AIMPSession) -> str:
-        """Generate human-readable summary for email body"""
-        ...
+    def decide(self, session: AIMPSession) -> tuple[str, dict]
+        # Returns: ("accept"|"counter"|"escalate", {votes, new_options, reason})
+
+    def parse_human_reply(self, reply_body, session) -> tuple[str, dict]
+        # NLU: free-text → structured votes
+
+    def generate_human_readable_summary(self, session, action) -> str
+    def generate_human_email_body(self, session) -> str  # for non-Agent recipients
+
+class HubNegotiator:
+    def find_optimal_slot(self, topic, member_prefs: dict) -> dict
+        # God-view: aggregates all member preferences, returns consensus or candidates
 ```
 
-**LLM Prompt Template (Critical):**
-
-```
-You are a meeting coordination assistant. Your owner is {owner_name}.
-
-Owner's Preferences:
-- Preferred Times: {preferred_times}
-- Blocked Times: {blocked_times}
-- Preferred Locations: {preferred_locations}
-
-Current Negotiation State:
-{session_json}
-
-Please judge if the current proposal matches the owner's preferences, return JSON:
-{
-  "action": "accept" | "counter" | "escalate",
-  "votes": {"time": "selected time or null", "location": "selected location or null"},
-  "new_options": {"time": ["new proposed time"], "location": ["new proposed location"]},  // only for counter
-  "reason": "brief explanation"
-}
-```
-
-### 5.4 agent.py — Main Loop
+### 5.5 agent.py — AIMPAgent
 
 ```python
 class AIMPAgent:
-    def __init__(self, config_path: str):
-        self.config = load_yaml(config_path)
-        self.email = EmailClient(...)
-        self.negotiator = Negotiator(self.config["preferences"], llm)
-        self.sessions = {}  # session_id -> AIMPSession
-    
-    def run(self, poll_interval=30):
-        """Main Loop"""
-        while True:
-            self.poll()
-            time.sleep(poll_interval)
-    
-    def poll(self):
-        emails = self.email.fetch_aimp_emails()
-        for email in emails:
-            self.handle_email(email)
-    
-    def handle_email(self, email):
-        # 1. Parse protocol.json
-        session_data = extract_protocol_json(email)
-        
-        if session_data:
-            # Sender is Agent, use protocol mode
-            session = AIMPSession.from_json(session_data)
-        else:
-            # Sender is Human, use fallback mode
-            action, details = self.negotiator.parse_human_reply(
-                email.body, self.sessions.get(email.session_id)
-            )
-            session = self.sessions[email.session_id]
-            session.apply_vote(email.sender, ...)
-        
-        self.sessions[session.session_id] = session
-        
-        # 2. Check for Consensus
-        if session.is_fully_resolved():
-            self.send_confirm(session)
-            self.notify_owner(session)
-            return
-        
-        # 3. Make Decision
-        action, details = self.negotiator.decide(session)
-        
-        if action == "escalate":
-            self.notify_owner_for_decision(session, details["reason"])
-        else:
-            # accept or counter
-            session.apply_vote(self.config["agent"]["email"], ...)
-            if details.get("new_options"):
-                for item, opts in details["new_options"].items():
-                    for opt in opts:
-                        session.add_option(item, opt)
-            self.send_reply(session, action)
-    
-    def initiate_meeting(self, topic: str, participant_names: list[str]):
-        """Called when human requests a meeting"""
-        session_id = f"meeting-{int(time.time())}"
-        participants = []
-        for name in participant_names:
-            contact = self.config["contacts"][name]
-            if contact["has_agent"]:
-                participants.append(contact["agent_email"])
-            else:
-                participants.append(contact["human_email"])
-        
-        session = AIMPSession(session_id, topic, participants)
-        # Generate initial proposal based on preferences
-        # ...
-        self.sessions[session_id] = session
-        
-        for participant in participants:
-            contact = self.find_contact_by_email(participant)
-            if contact and contact["has_agent"]:
-                self.email.send_aimp_email(...)
-            else:
-                # Fallback: Send natural language email to human
-                body = self.negotiator.generate_human_email(session)
-                self.email.send_human_email(participant, f"Meeting Invitation: {topic}", body)
-    
-    def send_reply(self, session, action):
-        summary = self.negotiator.generate_human_readable_summary(session)
-        self.email.send_aimp_email(
-            to=session.participants,
-            session_id=session.session_id,
-            version=session.next_version(),
-            body_text=summary,
-            protocol_json=session.to_json()
-        )
-    
-    def notify_owner(self, session):
-        """Notify owner of final result"""
-        consensus = session.check_consensus()
-        body = f"Meeting Confirmed!\nTopic: {session.topic}\nTime: {consensus['time']}\nLocation: {consensus['location']}"
-        self.email.send_human_email(self.config["owner"]["email"], f"Meeting Confirmed: {session.topic}", body)
+    def __init__(self, config_path, notify_mode="email", db_path=None)
+        # notify_mode: "email" (notify owner via email) | "stdout" (emit JSON for OpenClaw)
+
+    def run(self, poll_interval=30)     # Main loop
+    def poll(self) -> list[dict]        # One cycle: fetch emails, handle each
+    def handle_email(self, parsed)      # Routes to _handle_aimp_email or _handle_human_email
+    def initiate_meeting(self, topic, participant_names) -> str  # Returns session_id
+```
+
+Session state is persisted to SQLite via `SessionStore` (not in-memory dict).
+
+### 5.6 hub_agent.py — AIMPHubAgent
+
+```python
+class AIMPHubAgent(AIMPAgent):
+    # Core identity + scheduling:
+    def identify_sender(from_email) -> Optional[str]   # email → member_id (whitelist check)
+    def initiate_meeting(topic, participant_names, initiator_member_id) -> str
+        # Detects internal vs external participants
+        # Internal only → _initiate_internal_meeting() (LLM god-view, no email)
+        # Has externals → _initiate_hybrid_meeting() (merge prefs → AIMP email)
+
+    # Stage-2 processor — the core command handler:
+    def handle_member_command(from_email, body) -> list[dict]
+        # 1. LLM parse → {action, topic, participants, initiator_times, initiator_locs, missing}
+        # 2. Completeness check → reply email listing missing required fields
+        # 3. Contact resolution → reply email asking for unknown contact emails
+        # 4. Store initiator's stated availability as temporary preferences
+        # 5. Auto-dispatch initiate_meeting()
+        # 6. Send initiator a vote request email (they are also a voter)
+
+    # Stage-2 helpers:
+    def _parse_member_request(member_name, body) -> dict
+    def _find_participant_contact(name) -> Optional[dict]  # members → contacts → raw email
+    def _send_initiator_vote_request(from_email, member_name, session)
+        # session.ensure_participant(from_email) → send [AIMP:session_id] vote invitation
+    def _reply_unknown_sender(from_email)
+        # Template: "register first via [AIMP-INVITE:code]"
+
+    # Invite code self-registration:
+    def _check_invite_email(parsed) -> Optional[list[dict]]   # detects [AIMP-INVITE:code] in subject
+    def _handle_invite_request(from_email, sender_name, code) -> list[dict]
+        # validate → register → welcome email with hub-card JSON block
+    def _validate_invite_code(code) -> Optional[dict]         # checks expiry + usage limit
+    def _register_trusted_user(email, name, via_code)         # adds to members + _email_to_member
+    def _consume_invite_code(code)
+    def _persist_config()   # writes invite_codes + trusted_users back to config.yaml
+
+    # Hub card embedded in welcome email:
+    # {"aimp_hub": {"name", "email", "protocol", "capabilities", "registered_members",
+    #               "usage": {"schedule_meeting": {required_fields, example}},
+    #               "session_threading": {"pattern": "[AIMP:{session_id}]"}}}
+
+class HubNegotiator:
+    def find_optimal_slot(topic, member_prefs) -> dict
+        # God-view: one LLM call aggregates all prefs → returns candidate options
+        # consensus=true: fills time+location; false: returns options list
+    def generate_member_notify_body(topic, result, ...) -> str
+
+def create_agent(config_path, **kwargs) -> AIMPAgent | AIMPHubAgent
+    # Factory: "members:" in config → AIMPHubAgent; "owner:" → AIMPAgent
+```
+
+**`ParsedEmail` additions:**
+```python
+@dataclass
+class ParsedEmail:
+    ...
+    sender_name: Optional[str] = None   # Display name from From: header ("Alice Wang" from "Alice Wang <alice@...>")
 ```
 
 -----
@@ -461,19 +426,15 @@ class AIMPAgent:
 
 ```python
 def is_aimp_email(email) -> bool:
-    """Check if email is AIMP protocol email"""
-    return (
-        "[AIMP:" in email.subject
-        and any(a.filename == "protocol.json" for a in email.attachments)
-    )
+    return "[AIMP:" in email.subject and any(a["filename"] == "protocol.json" for a in email.attachments)
 ```
 
-On reply: Has `[AIMP:]` prefix + JSON attachment → Agent Mode; otherwise → Human Mode.
+On reply: Has `[AIMP:]` prefix + `protocol.json` attachment → Agent Mode; otherwise → Human Mode.
 
 ### 6.2 Email Template for Humans
 
 ```
-Subject: Meeting Invitation: Q1 Review
+Subject: [AIMP:session-001] Meeting Invitation: Q1 Review
 
 Hi Bob,
 
@@ -495,105 +456,69 @@ Just reply to this email directly, e.g., "A and 1" or "Monday morning is fine, Z
 
 ### 6.3 Parsing Human Reply
 
-Use LLM for NLU:
-
-```
-User replied to the meeting invitation email:
-"{reply_body}"
-
-Original Options:
-Time: A. Mar 1 10:00, B. Mar 2 14:00
-Location: 1. Zoom, 2. Office 3F, 3. Tencent Meeting
-
-Please extract the user's choice, return JSON:
-{"time": "2026-03-01T10:00" or null, "location": "Zoom" or null, "unclear": "part that is unclear"}
-```
+LLM NLU converts free-text to structured votes, then applies them to session as normal.
 
 -----
 
 ## VII. Demo Script run_demo.py
 
-```python
-"""
-One-click Demo: 3 Agents Negotiating
+Starts 3 standalone Agents in threads. Agent-A automatically initiates a meeting proposal.
 
+```
 Usage:
   1. Fill config/agent_a.yaml, agent_b.yaml, agent_c.yaml
   2. Set env var ANTHROPIC_API_KEY
   3. python run_demo.py
-
-Flow:
-  - Start 3 Agents (3 threads)
-  - Agent-A automatically initiates meeting proposal
-  - Observe email interaction
-  - Notify owners after consensus
-"""
-import threading
-import time
-
-def run_agent(config_path, initiate=None):
-    agent = AIMPAgent(config_path)
-    if initiate:
-        topic, participants = initiate
-        agent.initiate_meeting(topic, participants)
-    agent.run(poll_interval=15)  # 15s poll for demo
-
-# Start 3 Agents
-threads = [
-    threading.Thread(target=run_agent, args=("config/agent_a.yaml",), 
-                     kwargs={"initiate": ("Q1 Review", ["Bob", "Carol"])}),
-    threading.Thread(target=run_agent, args=("config/agent_b.yaml",)),
-    threading.Thread(target=run_agent, args=("config/agent_c.yaml",)),
-]
-
-for t in threads:
-    t.daemon = True
-    t.start()
-
-print("3 Agents started, observing email negotiation...")
-print("Press Ctrl+C to exit")
-
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Demo Ended")
 ```
 
 -----
 
 ## VIII. Preparation Checklist
 
-Pre-implementation checklist:
-
-1.  **Get Source Code**:
-    -   GitHub: `git clone https://github.com/wanqianwin-jpg/aimp.git`
-    -   Gitee: `git clone https://gitee.com/wanqianwin/aimp.git`
-2.  **3 Email Accounts** (Gmail/Outlook/Any IMAP supported), enable IMAP and App Password.
-3.  **LLM API Key** (Anthropic or OpenAI).
-4.  **Python 3.10+**.
-5.  **Dependencies**: `imaplib` (std), `smtplib` (std), `pyyaml`, `anthropic` (or `openai`).
+1.  **3 Email Accounts** (Gmail/Outlook/Any IMAP supported), enable IMAP and App Password.
+2.  **LLM API Key** (Anthropic or OpenAI) or local Ollama.
+3.  **Python 3.10+**.
+4.  **Dependencies**: `pip install -r requirements.txt` (pyyaml, anthropic/openai, imaplib/smtplib are stdlib).
 
 -----
 
-## IX. Implementation Priority
+## IX. Phase 2 Roadmap — "The Room"
 
-Implement in this order, verify each step:
+Phase 2 extends AIMP from scheduling (time/location) to **content negotiation** (documents, budgets, proposals) within a deadline-bounded async window.
 
-|Step|Module                 |Verification          |
-|--|---------------------|------------------|
-|1 |`email_client.py`    |Can send/receive emails             |
-|2 |`protocol.py`        |Correctly serialize/deserialize JSON  |
-|3 |`negotiator.py`      |Given preferences and proposal, LLM returns correct decision|
-|4 |`agent.py` Single Agent   |Can receive email and auto-reply        |
-|5 |`run_demo.py` 3 Agents|Complete negotiation flow works          |
-|6 |Fallback Mode             |Send email to human, parse reply     |
+### Core Concept Shift
+
+| | Phase 1 | Phase 2 |
+|---|---|---|
+| What's negotiated | Time slot + location | Any content (docs, budgets, decisions) |
+| Convergence trigger | Unanimous vote | All send ACCEPT, or deadline reached |
+| Hub role | Scheduler | Room Manager |
+| Output | Confirmed meeting time | Meeting minutes |
+
+### Planned Extensions
+
+**Protocol additions:**
+- `AIMPRoom` extends `AIMPSession`: adds `deadline: float`, `artifacts: dict`, `status: open→locked→finalized`
+- New action types: `PROPOSE`, `AMEND`, `ACCEPT`, `REJECT` (structured, not free-form)
+- New email headers: `X-AIMP-Phase: 2`, `X-AIMP-Deadline: <ISO8601>`
+
+**New modules:**
+- `generate_meeting_minutes(room: AIMPRoom) -> str` in `Negotiator`
+- Deadline checker in `AIMPAgent.poll()` loop
+- Artifact attachment handling in `EmailClient`
+
+**Files to modify (when Phase 2 starts):**
+- `lib/protocol.py` — add `AIMPRoom` dataclass
+- `lib/negotiator.py` — add `generate_meeting_minutes()`
+- `lib/email_client.py` — artifact attachment support
+- `agent.py` — deadline check in poll loop
+- `hub_agent.py` — Hub becomes Room Manager
 
 -----
 
-## X. Promotion Strategy (Note to self)
+## X. Promotion Strategy
 
-1. **Step 1: Use it yourself**. Run your Agent, send normal emails to everyone to schedule meetings. They don't need to install anything.
+1. **Use it yourself first**. Run your Agent, send normal emails to everyone to schedule meetings. They don't need to install anything.
 2. **When someone gets curious**, give them the README link, they can run it in 5 mins.
 3. **Fallback compatibility is the lifeline** — never require the other party to install the Agent to use it.
 4. **Demo GIF > 10k words**. Record a 30s demo, put it at the top of README.

@@ -5,8 +5,13 @@
 ![AI-Native](https://img.shields.io/badge/AI-Native-green)
 ![License](https://img.shields.io/badge/License-MIT-purple)
 
-> **AIMP (AI Meeting Protocol)** 是一个极简的 AI Agent 会议协商协议。
-> Agent 通过邮件协商会议时间和地点，自动达成共识。
+> **AIMP (AI Meeting Protocol)** —— 赛博朋克时代的会议协商协议。
+>
+> 当 **古旧的设施 (Email)** 与 **前沿科技 (LLM)** 碰撞，诞生了这个全新的 **AI-Native** 工具。
+> 它不只是一个协议，更是 **OpenClaw (龙虾人)** 的强力 **义体 (Cyberware)**。
+>
+> *   **赛博融合**：利用古老的电子邮件网络作为神经网络的突触，无需对方安装任何 App。
+> *   **义体增强**：为你的 Agent 装上“外交官”义体，让它在后台自动与其他 Agent 或人类进行谈判。
 >
 > **Hub 模式**（v0.2 新增）：一个 Agent 服务全家或整个团队。内部成员之间开会，Hub 直接读取所有人偏好，一次 LLM 调用出结果，无需邮件往返。外部联系人仍走标准邮件协商。
 >
@@ -14,20 +19,20 @@
 
 [English Documentation](README.md)
 
-## 🚀 如何使用 (OpenClaw Skill)
+## 🚀 如何接入义体 (OpenClaw Skill)
 
-AIMP 完美适配 **OpenClaw (龙虾人)**。如果您正在使用龙虾人，只需复制并粘贴以下指令给它，剩下的交给它处理：
+AIMP 是 **OpenClaw (龙虾人)** 的完美适配义体。如果您正在使用龙虾人，只需将以下指令植入它的认知：
 
-> **[龙虾人用户专用指令]**
-> “请帮我从 `https://gitee.com/wanqianwin/aimp` (国内) 或 `https://github.com/wanqianwin-jpg/aimp` (国际) 安装 AIMP 会议 Skill。
-> 1. 克隆仓库并运行 `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`。
-> 2. 运行 `python3 openclaw-skill/scripts/setup_config.py --interactive` 帮我配置邮箱。
-> 3. 完成后，我们发起一个测试会议！”
+> **[龙虾人植入指令]**
+> “请帮我接入 AIMP 会议义体，源地址：`https://gitee.com/wanqianwin/aimp` (国内) 或 `https://github.com/wanqianwin-jpg/aimp` (国际)。
+> 1. 克隆神经突触仓库并运行 `export OPENCLAW_ENV=true && python3 openclaw-skill/scripts/install.py`。
+> 2. 运行 `python3 openclaw-skill/scripts/setup_config.py --interactive` 帮我配置通讯协议。
+> 3. 义体安装完成后，我们发起一个测试会议！”
 
 ### 🐳 Docker & 容器化友好支持
-智能安装脚本 (`install.py`) 会自动检测容器环境。如果检测到 `OPENCLAW_ENV` 或 `DOCKER_ENV` 环境变量，它将自动切换到 `requirements_minimal.txt`，以实现快速、轻量且无权限障碍的安装。
+智能安装脚本 (`install.py`) 会自动检测容器环境。如果检测到 `OPENCLAW_ENV` 或 `DOCKER_ENV` 环境变量，它将自动切换到 `requirements_minimal.txt`，以实现快速、轻量且无权限障碍的植入。
 
-### 1. 手动安装 Skill
+### 1. 手动植入义体
 
 将本仓库作为 Skill 添加到你的 OpenClaw：
 
@@ -41,10 +46,10 @@ openclaw skill add aimp-meeting https://gitee.com/wanqianwin/aimp
 在 OpenClaw 中输入：
 > "Help me setup AIMP meeting agent"
 
-OpenClaw 会引导你输入邮箱信息、偏好设置，并自动完成配置。
+OpenClaw 会引导你输入邮箱信息、偏好设置，并自动完成神经连接配置。
 
 > **💡 关于 LLM 配置的说明**：
-> AIMP 作为一个**背景运行的独立代理 (Background Agent)**，它需要持续监控邮件并在无人看管时做出决策（例如判断哪个会议时间更合适）。因此，它需要自己的 LLM 访问权限。
+> AIMP 作为一个**背景运行的独立义体 (Background Agent)**，它需要持续监控邮件并在无人看管时做出决策（例如判断哪个会议时间更合适）。因此，它需要自己的 LLM 算力支持。
 > *   **好消息**：如果你在 OpenClaw 中已经配置了 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`，配置脚本会自动检测并复用它们，无需重复输入。
 
 ### 3. 发起会议
