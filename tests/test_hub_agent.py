@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
 
-from hub_agent import AIMPHubAgent, RoomNegotiator
+from hub_agent import AIMPHubAgent
+from lib.room_negotiator import RoomNegotiator
 from agent import AIMPAgent
 from lib.email_client import ParsedEmail
 from lib.protocol import AIMPSession, AIMPRoom, Artifact
@@ -363,30 +364,30 @@ class TestParseMemberRequest(unittest.TestCase):
             "participants": ["Bob"],
             "missing": [],
         }
-        with patch("hub_agent.call_llm", return_value='{"action":"schedule_meeting"}'), \
-             patch("hub_agent.extract_json", return_value=expected):
+        with patch("handlers.command_handler.call_llm", return_value='{"action":"schedule_meeting"}'), \
+             patch("handlers.command_handler.extract_json", return_value=expected):
             result = self.hub._parse_member_request("Alice", "Schedule Q2 with Bob")
         self.assertEqual(result["action"], "schedule_meeting")
         self.assertEqual(result["topic"], "Q2 Review")
         self.assertEqual(result["participants"], ["Bob"])
 
     def test_subject_included_in_prompt_when_present(self):
-        with patch("hub_agent.call_llm", return_value="{}") as mock_llm, \
-             patch("hub_agent.extract_json", return_value={"action": "unclear", "topic": None, "participants": [], "missing": []}):
+        with patch("handlers.command_handler.call_llm", return_value="{}") as mock_llm, \
+             patch("handlers.command_handler.extract_json", return_value={"action": "unclear", "topic": None, "participants": [], "missing": []}):
             self.hub._parse_member_request("Alice", "body text", subject="Budget meeting")
         # The user prompt (5th arg) should contain the subject
         user_prompt = mock_llm.call_args[0][4]
         self.assertIn("Budget meeting", user_prompt)
 
     def test_subject_omitted_when_empty(self):
-        with patch("hub_agent.call_llm", return_value="{}") as mock_llm, \
-             patch("hub_agent.extract_json", return_value={"action": "unclear", "topic": None, "participants": [], "missing": []}):
+        with patch("handlers.command_handler.call_llm", return_value="{}") as mock_llm, \
+             patch("handlers.command_handler.extract_json", return_value={"action": "unclear", "topic": None, "participants": [], "missing": []}):
             self.hub._parse_member_request("Alice", "body text", subject="")
         user_prompt = mock_llm.call_args[0][4]
         self.assertNotIn("Email subject:", user_prompt)
 
     def test_llm_failure_returns_fallback(self):
-        with patch("hub_agent.call_llm", side_effect=Exception("API timeout")):
+        with patch("handlers.command_handler.call_llm", side_effect=Exception("API timeout")):
             result = self.hub._parse_member_request("Alice", "unclear stuff")
         self.assertEqual(result["action"], "unclear")
         self.assertIn("topic", result["missing"])
@@ -581,7 +582,7 @@ class TestInitiateRoom(unittest.TestCase):
     def test_initiate_room_stdout_mode(self):
         """In stdout mode, no CFP email is sent; an event is emitted."""
         hub = make_hub(notify_mode="stdout")
-        with patch("hub_agent.emit_event") as mock_emit:
+        with patch("handlers.room_handler.emit_event") as mock_emit:
             room_id = hub.initiate_room(
                 topic="T",
                 participants=["a@b.com"],
@@ -733,7 +734,7 @@ class TestFinalizeRoom(unittest.TestCase):
         hub = make_hub(notify_mode="stdout")
         hub.room_negotiator = MagicMock()
         hub.room_negotiator.generate_meeting_minutes.return_value = "# Minutes"
-        with patch("hub_agent.emit_event") as mock_emit:
+        with patch("handlers.room_handler.emit_event") as mock_emit:
             hub._finalize_room(self.room)
         mock_emit.assert_called_once()
         self.assertEqual(mock_emit.call_args[0][0], "room_finalized")
@@ -782,7 +783,7 @@ class TestCheckDeadlines(unittest.TestCase):
 class TestRoomNegotiatorGenerateMinutes(unittest.TestCase):
     def setUp(self):
         llm_config = {"provider": "anthropic", "model": "claude-test"}
-        with patch("hub_agent.make_llm_client", return_value=(MagicMock(), "claude-test", "anthropic")):
+        with patch("lib.room_negotiator.make_llm_client", return_value=(MagicMock(), "claude-test", "anthropic")):
             self.rn = RoomNegotiator("TestHub", "hub@test.com", llm_config)
 
     def test_generate_minutes_returns_llm_output(self):
@@ -790,7 +791,7 @@ class TestRoomNegotiatorGenerateMinutes(unittest.TestCase):
         room.add_to_transcript("alice@example.com", "PROPOSE", "Proposal A")
         room.add_to_transcript("bob@example.com", "ACCEPT", "Looks good")
 
-        with patch("hub_agent.call_llm", side_effect=["# Minutes content", "# Minutes content"]):
+        with patch("lib.room_negotiator.call_llm", side_effect=["# Minutes content", "# Minutes content"]):
             minutes = self.rn.generate_meeting_minutes(room)
 
         self.assertIsInstance(minutes, str)
@@ -801,7 +802,7 @@ class TestRoomNegotiatorGenerateMinutes(unittest.TestCase):
         room = make_room()
         room.add_to_transcript("a@b.com", "ACCEPT", "ok")
 
-        with patch("hub_agent.call_llm", side_effect=Exception("LLM timeout")):
+        with patch("lib.room_negotiator.call_llm", side_effect=Exception("LLM timeout")):
             minutes = self.rn.generate_meeting_minutes(room)
 
         self.assertIn("Q3 Budget", minutes)

@@ -55,14 +55,22 @@ Hub is a **single deployable skill** — users interact via email only. No agent
 ```
 aimp/
 ├── lib/
-│   ├── transport.py       # BaseTransport ABC + EmailTransport
-│   ├── email_client.py    # IMAP/SMTP wrapper; ParsedEmail; is_aimp_email; extract_protocol_json
-│   ├── protocol.py        # AIMPSession + AIMPRoom + Artifact; round fields (Phase 4)
-│   ├── negotiator.py      # Negotiator (LLM decisions) + HubNegotiator
-│   ├── session_store.py   # SQLite: sessions, sent_messages, rooms, pending_emails
-│   └── output.py          # JSON stdout event emission
+│   ├── transport.py         # BaseTransport ABC + EmailTransport
+│   ├── email_client.py      # IMAP/SMTP wrapper; ParsedEmail; is_aimp_email; extract_protocol_json
+│   ├── protocol.py          # AIMPSession + AIMPRoom + Artifact; round fields (Phase 4)
+│   ├── negotiator.py        # Negotiator base (LLM decisions)
+│   ├── hub_negotiator.py    # HubNegotiator — member vote aggregation LLM helper
+│   ├── room_negotiator.py   # RoomNegotiator — Phase 2 content negotiation LLM helper
+│   ├── session_store.py     # SQLite: sessions, sent_messages, rooms, pending_emails
+│   └── output.py            # JSON stdout event emission
+├── handlers/
+│   ├── __init__.py
+│   ├── session_handler.py   # SessionMixin — Phase 1 scheduling methods
+│   ├── room_handler.py      # RoomMixin — Phase 2 room lifecycle methods
+│   ├── command_handler.py   # CommandMixin — member command parsing & dispatch
+│   └── registration_handler.py  # RegistrationMixin — invite code self-registration
 ├── agent.py               # AIMPAgent base class
-├── hub_agent.py           # AIMPHubAgent: Phase 1-4 logic + create_agent() factory
+├── hub_agent.py           # Thin orchestrator (~520 lines): AIMPHubAgent + create_agent() factory
 ├── hub_prompts.py         # Phase 1 LLM prompt templates
 ├── room_prompts.py        # Phase 2 LLM prompt templates
 ├── run_room_demo.py       # Phase 2 in-memory demo (no real email/LLM)
@@ -231,8 +239,14 @@ class BaseTransport(ABC):
 
 ### hub_agent.py
 
+`AIMPHubAgent` is now a thin orchestrator that inherits all behaviour from four mixins:
+
 ```python
-class AIMPHubAgent(AIMPAgent):
+class AIMPHubAgent(SessionMixin, RoomMixin, CommandMixin, RegistrationMixin, AIMPAgent):
+    # Owns: __init__, poll, identify_sender, _notify_members, _handle_human_email,
+    #       _notify_owner_confirmed, _load_internal_members,
+    #       _parse_deadline, _ts_to_iso, _email_to_name
+
     # Poll (Phase 4 store-first + round-gated):
     def poll() -> list[dict]
         # Phase 2: fetch_phase2_emails → save_pending → record_round_reply
@@ -241,26 +255,36 @@ class AIMPHubAgent(AIMPAgent):
         #          → if round_complete: _process_session_round → mark_processed
         # Commands: fetch_all_unread → save_pending → handle_member_command
 
-    # Round processors:
-    def _process_session_round(session, pending) -> list[dict]
-    def _process_room_round(room, pending) -> list[dict]
-
-    # Scheduling:
-    def initiate_meeting(topic, participant_names, initiator_member_id) -> str
-    def handle_member_command(from_email, body) -> list[dict]
-
-    # Room lifecycle:
-    def initiate_room(topic, participants, deadline, initial_proposal, initiator) -> str
-    def _handle_room_email(parsed) -> list[dict]   # still used for non-round-gated paths
-    def _finalize_room(room)
-    def _check_deadlines()
-
-    # Registration:
-    def _check_invite_email(parsed) -> Optional[list[dict]]
-    def identify_sender(from_email) -> Optional[str]
-
 def create_agent(config_path, **kwargs) -> AIMPHubAgent
     # Raises ValueError if config is not Hub mode
+```
+
+**Mixin responsibilities:**
+
+| Mixin | File | Methods |
+|-------|------|---------|
+| `SessionMixin` | `handlers/session_handler.py` | `initiate_meeting`, `_initiate_internal_meeting`, `_initiate_hybrid_meeting`, `_apply_votes_from_protocol`, `_send_session_reply`, `_process_session_round` |
+| `RoomMixin` | `handlers/room_handler.py` | `initiate_room`, `_handle_room_email`, `_apply_room_action`, `_send_room_reply`, `_process_room_round`, `_finalize_room`, `_check_deadlines`, `_handle_room_confirm`, `_handle_room_reject`, `_broadcast_room_status` |
+| `CommandMixin` | `handlers/command_handler.py` | `handle_member_command`, `_handle_create_room_command`, `_parse_member_request`, `_find_participant_contact`, `_send_initiator_vote_request`, `_is_auto_reply`, `_reply_unknown_sender` |
+| `RegistrationMixin` | `handlers/registration_handler.py` | `_check_invite_email`, `_handle_invite_request`, `_validate_invite_code`, `_register_trusted_user`, `_consume_invite_code`, `_persist_config` |
+
+**Import rule:** mixins import from `lib/` and prompt files only — never from `hub_agent` or each other. Cross-mixin calls go through `self` (Python MRO resolves them automatically).
+
+### lib/hub_negotiator.py
+
+```python
+class HubNegotiator:
+    def find_optimal_slot(topic, member_replies) -> dict
+    def generate_member_notify_body(topic, result, initiator_name, participant_names) -> str
+```
+
+### lib/room_negotiator.py
+
+```python
+class RoomNegotiator:
+    def parse_amendment(member_name, body, current_artifacts) -> dict
+    def aggregate_amendments(room) -> dict
+    def generate_meeting_minutes(room) -> str
 ```
 
 ---

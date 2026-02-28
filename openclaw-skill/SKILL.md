@@ -1,6 +1,6 @@
 ---
 name: aimp-meeting
-version: "0.2.1"
+version: "0.3.0"
 description: "AI 会议义体管理员：部署并操控 AIMP Hub 后台进程，通过 Email 协议自动协商会议。"
 emoji: "🦾"
 metadata:

@@ -30,3 +30,7 @@ jobs:
         ruff check . --select=E9,F63,F7,F82 --target-version=py310
         # exit-zero treats all errors as warnings.
         ruff check . --exit-zero
+    - name: Run tests
+      env:
+        ANTHROPIC_API_KEY: "test-key"
+      run: python -m pytest tests/ -v

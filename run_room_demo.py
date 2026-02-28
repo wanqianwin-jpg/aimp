@@ -45,7 +45,8 @@ HUB   = "hub@example.com"
 
 def build_hub(store: SessionStore):
     """Create a minimal AIMPHubAgent wired to an in-memory store."""
-    from hub_agent import AIMPHubAgent, RoomNegotiator
+    from hub_agent import AIMPHubAgent
+    from lib.room_negotiator import RoomNegotiator
 
     hub = object.__new__(AIMPHubAgent)
     hub.hub_name = "Demo Hub"
@@ -72,7 +73,7 @@ def build_hub(store: SessionStore):
     hub.hub_negotiator = MagicMock()
 
     # Wire a real RoomNegotiator but mock the LLM calls
-    with patch("hub_agent.make_llm_client", return_value=(MagicMock(), "claude-mock", "anthropic")):
+    with patch("lib.room_negotiator.make_llm_client", return_value=(MagicMock(), "claude-mock", "anthropic")):
         hub.room_negotiator = RoomNegotiator("Demo Hub", HUB, {"provider": "anthropic", "model": "claude-mock"})
 
     return hub
@@ -122,7 +123,7 @@ def run_demo():
     # 5 seconds deadline (ultra short for demo)
     deadline_ts = time.time() + 8
 
-    with patch("hub_agent.emit_event") as mock_emit:
+    with patch("handlers.room_handler.emit_event") as mock_emit:
         room_id = hub.initiate_room(
             topic="Q3 预算方案",
             participants=[ALICE, BOB, CAROL],
@@ -150,8 +151,8 @@ def run_demo():
 
     bob_body = "我认为市场预算需要增加。建议调整为：市场 $35,000，研发 $55,000，合计保持 $100,000。"
 
-    with patch("hub_agent.call_llm", return_value='{"action":"AMEND","changes":"增加市场预算至$35k，削减研发至$55k","reason":"市场竞争加剧，需要更多推广资源","new_content":"Q3预算草案v0.2\\n  - 研发：$55,000\\n  - 市场：$35,000\\n  - 运营：$15,000\\n  合计：$100,000"}'), \
-         patch("hub_agent.extract_json", return_value={
+    with patch("lib.room_negotiator.call_llm", return_value='{"action":"AMEND","changes":"增加市场预算至$35k，削减研发至$55k","reason":"市场竞争加剧，需要更多推广资源","new_content":"Q3预算草案v0.2\\n  - 研发：$55,000\\n  - 市场：$35,000\\n  - 运营：$15,000\\n  合计：$100,000"}'), \
+         patch("lib.room_negotiator.extract_json", return_value={
              "action": "AMEND",
              "changes": "增加市场预算至$35k，削减研发至$55k",
              "reason": "市场竞争加剧，需要更多推广资源",
@@ -173,8 +174,8 @@ def run_demo():
 
     carol_body = "同意增加市场预算方向，但我建议再保留 $5k 备用金。总预算调整为 $105,000。"
 
-    with patch("hub_agent.call_llm", return_value='{}'), \
-         patch("hub_agent.extract_json", return_value={
+    with patch("lib.room_negotiator.call_llm", return_value='{}'), \
+         patch("lib.room_negotiator.extract_json", return_value={
              "action": "AMEND",
              "changes": "增加 $5k 备用金，总预算调至 $105,000",
              "reason": "风险管控",
@@ -220,14 +221,14 @@ def run_demo():
         "- Q3 正式启动前完成审批流程\n"
     )
 
-    with patch("hub_agent.call_llm", return_value=minutes_text), \
-         patch("hub_agent.extract_json", return_value={
+    with patch("lib.room_negotiator.call_llm", return_value=minutes_text), \
+         patch("lib.room_negotiator.extract_json", return_value={
              "current_proposal": "Q3总预算$110,000",
              "conflicts": [],
              "ready_to_finalize": True,
              "summary": "三方已就增加市场预算和备用金达成初步共识",
          }), \
-         patch("hub_agent.emit_event") as mock_emit:
+         patch("handlers.room_handler.emit_event") as mock_emit:
         hub._check_deadlines()
 
     room = store.load_room(room_id)

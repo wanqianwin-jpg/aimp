@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-03-01
+
+### Changed
+- **Refactored `hub_agent.py`** from a 1943-line monolith into a thin orchestrator (~520 lines).
+  - `HubNegotiator` extracted to `lib/hub_negotiator.py`.
+  - `RoomNegotiator` extracted to `lib/room_negotiator.py`.
+  - `AIMPHubAgent` methods split into four mixin classes under a new `handlers/` package:
+    - `handlers/session_handler.py` — `SessionMixin` (Phase 1 scheduling)
+    - `handlers/room_handler.py` — `RoomMixin` (Phase 2 room lifecycle)
+    - `handlers/command_handler.py` — `CommandMixin` (member command parsing)
+    - `handlers/registration_handler.py` — `RegistrationMixin` (invite code registration)
+  - `AIMPHubAgent` now inherits: `SessionMixin, RoomMixin, CommandMixin, RegistrationMixin, AIMPAgent`.
+  - All external interfaces unchanged — no test structural changes required.
+- **CI**: Added `pytest` step to `.github/workflows/ci.yml` (87 tests, runs after lint).
+
 ## [0.2.1] - 2026-02-28
 
 ### Changed
