@@ -39,6 +39,10 @@ def make_hub(**overrides) -> AIMPHubAgent:
     hub._replied_senders = {}
     hub.transport = MagicMock()
     hub.store = MagicMock()
+    hub.store.save_pending_email = MagicMock(return_value=1)
+    hub.store.load_pending_for_session = MagicMock(return_value=[])
+    hub.store.load_pending_for_room = MagicMock(return_value=[])
+    hub.store.mark_processed = MagicMock()
     hub.negotiator = MagicMock()
     hub.hub_negotiator = MagicMock()
     hub.hub_negotiator.model = "claude-test"
@@ -937,6 +941,180 @@ class TestHandleCreateRoomCommand(unittest.TestCase):
         mock_init.assert_called_once()
         self.assertEqual(events[0]["type"], "room_created")
         self.assertEqual(events[0]["room_id"], "room-123")
+
+
+# ── Phase 4: TestRoundGating ──────────────────────────────────────────────────
+
+class TestRoundGating(unittest.TestCase):
+    """Tests for store-first + round-gated poll() logic."""
+
+    def _make_session(self, participants=None, initiator="hub@test.com"):
+        if participants is None:
+            participants = ["hub@test.com", "alice@example.com", "bob@example.com"]
+        s = AIMPSession(
+            session_id="sess-rg",
+            topic="Round Gating Test",
+            participants=participants,
+            initiator=initiator,
+        )
+        return s
+
+    def setUp(self):
+        self.hub = make_hub()
+        self.hub.agent_email = "hub@test.com"
+
+    # ── test_session_email_stored_before_processing ──────────────────────────
+
+    def test_session_email_stored_before_processing(self):
+        """save_pending_email must be called before is_round_complete is checked."""
+        session = self._make_session()
+        # Only alice replies — round not complete (bob hasn't replied)
+        self.hub.store.load.return_value = session
+        self.hub.store.save = MagicMock()
+
+        parsed = make_parsed(
+            sender="alice@example.com",
+            subject="[AIMP:sess-rg] vote",
+            session_id="sess-rg",
+        )
+        # Provide a real AIMP email (no protocol.json attachment → not is_aimp_email)
+        self.hub.transport.fetch_aimp_emails.return_value = [parsed]
+        self.hub.transport.fetch_phase2_emails.return_value = []
+        self.hub.transport.fetch_all_unread_emails.return_value = []
+
+        self.hub.poll()
+
+        # save_pending_email must have been called
+        self.hub.store.save_pending_email.assert_called()
+        # _process_session_round NOT triggered (round incomplete)
+        self.hub.store.load_pending_for_session.assert_not_called()
+
+    # ── test_session_round_not_complete_no_reply ─────────────────────────────
+
+    def test_session_round_not_complete_no_reply(self):
+        """When only one of two non-initiators replies, no round processing occurs."""
+        session = self._make_session(
+            participants=["hub@test.com", "alice@example.com", "bob@example.com"]
+        )
+        self.hub.store.load.return_value = session
+        self.hub.store.save = MagicMock()
+
+        parsed = make_parsed(
+            sender="alice@example.com",
+            session_id="sess-rg",
+        )
+        self.hub.transport.fetch_aimp_emails.return_value = [parsed]
+        self.hub.transport.fetch_phase2_emails.return_value = []
+        self.hub.transport.fetch_all_unread_emails.return_value = []
+
+        self.hub.poll()
+
+        self.hub.store.load_pending_for_session.assert_not_called()
+
+    # ── test_session_round_complete_triggers_process ─────────────────────────
+
+    def test_session_round_complete_triggers_process(self):
+        """When all non-initiators reply, _process_session_round is triggered."""
+        session = self._make_session(
+            participants=["hub@test.com", "alice@example.com"],
+            initiator="hub@test.com",
+        )
+        # Pre-fill alice as already recorded (round 1 needs only non-initiators)
+        self.hub.store.load.return_value = session
+        self.hub.store.save = MagicMock()
+        self.hub.store.load_pending_for_session.return_value = [
+            {"id": 1, "from_addr": "alice@example.com",
+             "subject": "vote", "body": "accept", "protocol_json": None}
+        ]
+
+        parsed = make_parsed(sender="alice@example.com", session_id="sess-rg")
+        self.hub.transport.fetch_aimp_emails.return_value = [parsed]
+        self.hub.transport.fetch_phase2_emails.return_value = []
+        self.hub.transport.fetch_all_unread_emails.return_value = []
+
+        with patch.object(self.hub, "_process_session_round", return_value=[]) as mock_proc:
+            self.hub.poll()
+
+        mock_proc.assert_called_once()
+        self.hub.store.mark_processed.assert_called_once_with(1)
+
+    # ── test_room_round_not_complete_waits ───────────────────────────────────
+
+    def test_room_round_not_complete_waits(self):
+        """When only one room participant replies, no round processing occurs."""
+        room = make_room(participants=["alice@example.com", "bob@example.com"])
+        self.hub.store.load_room.return_value = room
+        self.hub.store.save_room = MagicMock()
+
+        parsed = make_parsed(
+            sender="alice@example.com",
+            subject="[AIMP:Room:room-001]",
+            room_id="room-001",
+        )
+        self.hub.transport.fetch_phase2_emails.return_value = [parsed]
+        self.hub.transport.fetch_aimp_emails.return_value = []
+        self.hub.transport.fetch_all_unread_emails.return_value = []
+
+        self.hub.poll()
+
+        self.hub.store.load_pending_for_room.assert_not_called()
+
+    # ── test_room_round_complete_triggers_process ────────────────────────────
+
+    def test_room_round_complete_triggers_process(self):
+        """When all room non-initiators reply, _process_room_round is triggered."""
+        # initiator = alice, only bob needs to reply (round 1 = odd)
+        room = make_room(
+            participants=["alice@example.com", "bob@example.com"],
+        )
+        room.initiator = "alice@example.com"
+        self.hub.store.load_room.return_value = room
+        self.hub.store.save_room = MagicMock()
+        self.hub.store.load_pending_for_room.return_value = [
+            {"id": 2, "from_addr": "bob@example.com",
+             "subject": "amend", "body": "AMEND something", "protocol_json": None}
+        ]
+
+        parsed = make_parsed(
+            sender="bob@example.com",
+            subject="[AIMP:Room:room-001]",
+            room_id="room-001",
+        )
+        self.hub.transport.fetch_phase2_emails.return_value = [parsed]
+        self.hub.transport.fetch_aimp_emails.return_value = []
+        self.hub.transport.fetch_all_unread_emails.return_value = []
+
+        with patch.object(self.hub, "_process_room_round", return_value=[]) as mock_proc:
+            self.hub.poll()
+
+        mock_proc.assert_called_once()
+        self.hub.store.mark_processed.assert_called_once_with(2)
+
+    # ── test_pending_email_marked_after_processing ───────────────────────────
+
+    def test_pending_email_marked_after_processing(self):
+        """After successful round processing, all pending emails are marked processed."""
+        session = self._make_session(
+            participants=["hub@test.com", "alice@example.com"],
+            initiator="hub@test.com",
+        )
+        pending = [
+            {"id": 10, "from_addr": "alice@example.com",
+             "subject": "vote", "body": "ok", "protocol_json": None},
+        ]
+        self.hub.store.load.return_value = session
+        self.hub.store.save = MagicMock()
+        self.hub.store.load_pending_for_session.return_value = pending
+
+        parsed = make_parsed(sender="alice@example.com", session_id="sess-rg")
+        self.hub.transport.fetch_aimp_emails.return_value = [parsed]
+        self.hub.transport.fetch_phase2_emails.return_value = []
+        self.hub.transport.fetch_all_unread_emails.return_value = []
+
+        with patch.object(self.hub, "_process_session_round", return_value=[]):
+            self.hub.poll()
+
+        self.hub.store.mark_processed.assert_called_once_with(10)
 
 
 if __name__ == "__main__":

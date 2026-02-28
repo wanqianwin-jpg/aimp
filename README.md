@@ -2,215 +2,157 @@
 
 ![Status](https://img.shields.io/badge/Status-Alpha-orange)
 ![OpenClaw](https://img.shields.io/badge/OpenClaw-Compatible-blue)
-![AI-Native](https://img.shields.io/badge/AI-Native-green)
 ![License](https://img.shields.io/badge/License-MIT-purple)
 
-> **AIMP (AI Meeting Protocol)** —— A meeting negotiation protocol with a Cyberpunk aesthetic.
->
-> Where **Ancient Infrastructure (Email)** meets **New Technology (LLM)**, forging a new **AI-Native** tool.
-> It's not just a protocol; it's a powerful **Cyberware (Skill)** for **OpenClaw**.
->
-> *   **Cyber-Fusion**: Utilizing the ancient email network as synapses, requiring no installation from the other party.
-> *   **Cyberware Enhancement**: Install a "Diplomat" implant for your Agent, allowing it to negotiate with other Agents or humans in the background.
->
-> **Hub Mode** (v0.2.0): One Agent serves a whole family or team. Internal members get instant scheduling via "god view" — no email rounds needed. External contacts still use standard email negotiation.
->
-> **The Room** (v0.2.0): Async content negotiation with deadlines. Perfect for documents, budgets, and complex decisions.
->
-> **Fallback Compatibility**: If the recipient does not have an Agent, AIMP automatically sends a natural language email and parses the reply using an LLM.
+> AI Agents negotiate meeting times and content over email — no app installation required for the other party.
+
+**Hub Mode** — One Hub email address serves your whole team. Internal scheduling is resolved in a single LLM call. External contacts still go through standard AIMP email negotiation.
+
+**The Room** — Async content negotiation (documents, budgets, decisions) with a deadline. Anyone can participate by replying to email.
+
+**Fallback compatibility** — If the other party has no Agent, Hub sends human-readable email and parses their free-text reply via LLM.
 
 [中文文档](README_zh.md)
 
-##  Install as OpenClaw Skill
+---
 
-### Step 1 — Register the Skill
+## Quick Start (OpenClaw)
 
-Copy the `openclaw-skill/` directory into your OpenClaw skills folder, then restart OpenClaw:
+### 1. Register Skill
 
 ```bash
-# Option A: clone and register in one go
 git clone https://github.com/wanqianwin-jpg/aimp.git
 cp -r aimp/openclaw-skill ~/.openclaw/skills/aimp-meeting
-# restart OpenClaw — the skill is now available
-
-# Option B (China mirror)
-git clone https://gitee.com/wanqianwin/aimp.git
-cp -r aimp/openclaw-skill ~/.openclaw/skills/aimp-meeting
+# Restart OpenClaw
 ```
 
-> **For agents doing this automatically**: clone the repo, copy `openclaw-skill/` to `~/.openclaw/skills/aimp-meeting/`, then tell the user to restart OpenClaw and say "set up AIMP".
-
-### Step 2 — First-time Setup (inside OpenClaw after restart)
+### 2. Setup
 
 Tell OpenClaw:
-> "帮我配置 AIMP" / "set up AIMP meeting skill"
+> "Help me set up AIMP"
 
-The agent will walk you through:
-1. Preparing a dedicated Hub email address (QQ / 163 / Gmail — not your personal email)
-2. Installing Python dependencies
-3. Generating `~/.aimp/config.yaml`
-4. Configuring the LLM (Anthropic / OpenAI / local Ollama)
-5. Starting the Hub background process
+The Agent will guide you through: creating a Hub email, installing dependencies, generating `~/.aimp/config.yaml`, and starting the Hub process.
 
-### Step 3 — Use It
+### 3. Use
 
-Once set up, just tell OpenClaw naturally:
-> "帮我约 Bob 下周五下午开会" / "Schedule a meeting with Bob next Friday"
+> "Schedule a meeting with Bob next Friday afternoon"
 
-> 💡 **How it works**: AIMP runs a persistent Hub process in the background (independent of OpenClaw sessions). The Hub monitors a dedicated email address and handles all negotiation automatically — no installation required on the other party's side.
+> "Start a negotiation room with Alice and Carol for the Q3 budget, deadline in 3 days. Initial proposal: R&D $60k, Marketing $25k, Ops $15k"
 
------
-
-## 🛠️ Manual Development & Testing
-
-If you are a developer and want to run or debug manually:
-
-### 1. Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Generate Configuration
-```bash
-python3 openclaw-skill/scripts/setup_config.py --interactive
-```
-
-### 3. Run Agent
-
-**Standalone mode** (original):
-```bash
-python3 agent.py ~/.aimp/config.yaml --notify stdout
-```
-
-**Hub mode** (auto-detected from config):
-```bash
-python3 hub_agent.py ~/.aimp/config.yaml --notify stdout
-```
-
------
+---
 
 ## Architecture
 
 ```
-aimp/
-├── lib/                          # Core Library
-│   ├── email_client.py           # IMAP/SMTP Wrapper
-│   ├── protocol.py               # AIMP/0.1 Protocol Data Model
-│   ├── negotiator.py             # LLM Negotiation Decision Engine
-│   ├── session_store.py          # SQLite Session Persistence
-│   └── output.py                 # JSON Structured Output
-├── agent.py                      # Standalone Agent (1 person, 1 Agent)
-├── hub_agent.py                  # Hub Agent (1 Agent serves multiple people) ← NEW
-├── run_demo.py                   # 3-Agent Independent Demo
-├── config/                       # Demo Configuration
-│
-├── openclaw-skill/               # OpenClaw Skill Distribution Directory
-│   ├── SKILL.md                  # Skill Definition + Runbook
-│   ├── scripts/
-│   │   ├── initiate.py           # Initiate Meeting (hub/standalone auto-detect)
-│   │   ├── poll.py               # Single Poll
-│   │   ├── respond.py            # Inject Owner Reply
-│   │   ├── status.py             # Query Status
-│   │   └── setup_config.py       # Configuration Generation (hub/standalone wizard)
-│   └── references/
-│       ├── protocol-spec.md      # Protocol Specification
-│       └── config-example.yaml   # Configuration Example (both modes)
-│
-└── requirements.txt
+New user ──[AIMP-INVITE:code]──→ ┐
+Member   ──natural language──→  ├─ HubAgent (1 email address) ──→ External contacts / Agents
+                                 ↓
+                     Notify all participants
 ```
 
-## Deployment Modes
+**Phase 1 — Scheduling:**
 
-| | Hub Mode | Standalone Mode |
-|---|---|---|
-| **Who deploys** | 1 person (the Host) | Each person separately |
-| **Who can use it** | All listed members | Just the owner |
-| **Internal scheduling** | Instant (1 LLM call, no email) | Multi-round email negotiation |
-| **External contacts** | Standard email negotiation | Standard email negotiation |
-| **LLM cost** | Shared, 1 key | Per person |
-| **Config field** | `members:` + `hub:` | `owner:` + `agent:` |
+| Stage | Actor | Subject pattern |
+|-------|-------|-----------------|
+| Self-registration | New user | `[AIMP-INVITE:code]` |
+| Meeting request | Member | (any) |
+| AIMP negotiation | Hub ↔ Externals | `[AIMP:session_id]` |
 
-**Hub mode config snippet:**
+**Phase 2 — Room (content negotiation):**
+
+| Stage | Actor | Subject pattern |
+|-------|-------|-----------------|
+| Create room | Member → Hub | (any) |
+| CFP / Amendments | Hub ↔ Participants | `[AIMP:Room:room_id]` |
+| Meeting minutes + veto | Hub ↔ Participants | `[AIMP:Room:room_id]` |
+
+**Round Protocol** — Hub does not reply to each email immediately. It waits for the round to complete, then sends one aggregated summary.
+
+| Round | Who must reply |
+|-------|---------------|
+| Round 1 | All non-initiators (initiator already spoke via initial proposal) |
+| Round 2+ | All participants including initiator |
+
+**Store-First** — Every incoming email is persisted to SQLite before LLM processing. A mid-round crash loses nothing.
+
+---
+
+## Configuration
+
 ```yaml
 mode: hub
 hub:
   name: "Family Hub"
-  email: "family-hub@gmail.com"
+  email: "hub@example.com"
+  imap_server: "imap.gmail.com"
+  smtp_server: "smtp.gmail.com"
+  password: "$HUB_PASSWORD"
+
 members:
   alice:
-    email: "alice@gmail.com"
-    role: "admin"
-    preferences:
-      preferred_times: ["weekday mornings"]
-      preferred_locations: ["Zoom"]
+    name: "Alice"
+    email: "alice@example.com"
+    role: "admin"           # admin | member
   bob:
-    email: "bob@gmail.com"
+    name: "Bob"
+    email: "bob@example.com"
     role: "member"
-    preferences:
-      preferred_times: ["afternoon 14:00-17:00"]
-      preferred_locations: ["Tencent Meeting"]
+
+contacts:                   # External (no Hub required)
+  Dave:
+    human_email: "dave@example.com"
+    has_agent: false
+
+invite_codes:
+  - code: "welcome-2026"
+    expires: "2026-12-31"
+    max_uses: 3
+    used: 0                 # auto-updated
+
+trusted_users: {}           # auto-populated via invite flow
+
 llm:
-  provider: "local"        # Ollama — free, runs on your own machine
-  model: "llama3"
-  base_url: "http://localhost:11434/v1"
+  provider: "anthropic"
+  model: "claude-sonnet-4-6"
+  api_key_env: "ANTHROPIC_API_KEY"
+  # or: provider: local, base_url: http://localhost:11434/v1, model: llama3
 ```
+
+---
+
+## Running Manually
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Config wizard
+python3 openclaw-skill/scripts/setup_config.py --interactive
+
+# Run Hub
+python3 hub_agent.py ~/.aimp/config.yaml
+
+# Phase 2 in-memory demo (no real email or LLM needed)
+python3 run_room_demo.py
+
+# Tests
+python -m pytest tests/ -v   # 87 tests
+```
+
+---
 
 ## Roadmap
 
-- [x] **v0.1 (MVP)**
-    - Basic Email Negotiation Protocol
-    - Human Fallback (Natural Language Parsing)
-    - OpenClaw Skill Integration
-    - Multi-source Download (GitHub/Gitee)
-- [x] **v0.2 (Hub Mode)**
-    - [x] **Hub Mode**: One Agent serves multiple people (family/team)
-    - [x] **God-view scheduling**: Internal members — 1 LLM call, instant result, no email rounds
-    - [x] **Auto identity recognition**: Whitelist-based sender identification
-    - [x] **Local LLM support** (Ollama/LM Studio): No API key needed
-    - [x] **Hybrid mode**: Hub handles internal fast-path + external email negotiation
-- [ ] **v1.0 (Release)**
-    - [ ] Calendar integration (Google Calendar / Outlook)
-    - [ ] Multi-language support (i18n)
-    - [ ] Enterprise deployment guide
-    - [ ] Docker Compose for Hub deployment
+| Phase | Status | Description |
+|-------|--------|-------------|
+| Phase 1 | ✅ Complete | Email negotiation, human fallback, OpenClaw Skill |
+| Phase 2 | ✅ Complete | Hub Mode + The Room (async content negotiation) |
+| Phase 3 | ✅ Complete | Transport abstraction (`BaseTransport`) |
+| Phase 4 | ✅ Complete | Store-First + Round Protocol (reliable processing) |
+| Phase 5 | 🗓 Planned | Multi-transport: Telegram / Slack |
 
-## Protocol Specification
+---
 
-Email Subject: `[AIMP:<session_id>] v<version> <topic>`
+## License
 
-| action   | Meaning      | Trigger Condition |
-|----------|--------------|-------------------|
-| propose  | Initiate Proposal | Human requests a meeting |
-| accept   | Accept Proposal   | All items match preferences |
-| counter  | Counter Proposal  | Partial match, propose alternatives |
-| confirm  | Final Confirmation| All participants accept |
-| escalate | Escalate to Human | Cannot decide automatically |
-
-If consensus is not reached after 5 rounds, it automatically escalates to human intervention.
-
-## Fallback Compatibility
-
-When a contact does not have an Agent (`has_agent: false`), a natural language email is automatically sent, and the human's free-text reply is parsed using an LLM.
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `ANTHROPIC_API_KEY` | Anthropic API Key |
-| `AIMP_AGENT_EMAIL` | Agent Email |
-| `AIMP_AGENT_PASSWORD` | Agent Email Password |
-| `AIMP_IMAP_SERVER` | IMAP Server |
-| `AIMP_SMTP_SERVER` | SMTP Server |
-| `AIMP_POLL_INTERVAL` | Poll Interval (seconds, default 15) |
-
-## 🤖 AI Tool Usage Declaration
-
-This project proudly leverages advanced AI tools for development. We believe in transparency and the future of AI-native software engineering.
-
-- **IDE**: Trae (Powered by Gemini-3-Pro / Claude-4.6-Sonnet)
-- **CLI**: Claude Code (Claude 4.6 Sonnet)
-- **Model**: Gemini 3 Pro
-
-For detailed usage scenarios and responsibility declaration, please refer to [AI_USAGE.md](AI_USAGE.md).
-
-## 📄 License
+MIT

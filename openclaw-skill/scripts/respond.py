@@ -16,7 +16,7 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 _aimp_root = os.path.abspath(os.path.join(_script_dir, "..", ".."))
 sys.path.insert(0, _aimp_root)
 
-from lib.email_client import EmailClient  # noqa: E402
+from lib.transport import EmailTransport  # noqa: E402
 from lib.negotiator import Negotiator  # noqa: E402
 from lib.protocol import AIMPSession  # noqa: E402
 from lib.session_store import SessionStore  # noqa: E402
@@ -84,10 +84,10 @@ def main():
             llm_config=config.get("llm", {}),
         )
 
-        email_client = EmailClient(
+        transport = EmailTransport(
+            email_addr=agent_email,
             imap_server=agent_cfg["imap_server"],
             smtp_server=agent_cfg["smtp_server"],
-            email_addr=agent_email,
             password=resolve_password(agent_cfg),
             imap_port=agent_cfg.get("imap_port", 993),
             smtp_port=agent_cfg.get("smtp_port", 465),
@@ -115,7 +115,7 @@ def main():
             recipients = [p for p in session.participants if p != agent_email]
             refs = store.load_message_ids(session.session_id)
 
-            msg_id = email_client.send_aimp_email(
+            msg_id = transport.send_aimp_email(
                 to=recipients,
                 session_id=session.session_id,
                 version=session.version,
@@ -143,7 +143,7 @@ def main():
             recipients = [p for p in session.participants if p != agent_email]
             refs = store.load_message_ids(session.session_id)
 
-            msg_id = email_client.send_aimp_email(
+            msg_id = transport.send_aimp_email(
                 to=recipients,
                 session_id=session.session_id,
                 version=session.version,

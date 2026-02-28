@@ -13,6 +13,7 @@ Configuration format (two types, auto-detected) / 配置格式（两种，自动
   standalone mode: Top level has "owner:" field -> degrades to standard AIMPAgent / standalone 模式：顶层有 "owner:" 字段 → 退化为标准 AIMPAgent
 """
 from __future__ import annotations
+import json
 import logging
 import sys
 import time
@@ -584,57 +585,87 @@ class AIMPHubAgent(AIMPAgent):
 
     def poll(self):
         """
-        Hub 版 poll：
-          0. Phase 2 FIRST: 先处理 [AIMP:Room:] 邮件（标记已读，避免父类重复处理）
-          1. 父类 poll() 处理 AIMP 协议邮件（含人类回复）
-          2. 收取所有未读邮件，处理成员直接发来的指令
-          3. 检查 deadline 已过的 Room
+        Hub 版 poll（Store-First + Round-Gated）：
+          1. Phase 2: 先入库，等本轮所有参与者回复后统一处理
+          2. Phase 1: 先入库，等本轮所有参与者回复后统一处理
+          3. 成员指令：即时处理，仍先存库作审计
+          4. 检查 deadline 已过的 Room
         """
         events = []
 
-        # ── Phase 2: Room emails FIRST (mark read before parent poll sees them) ──
+        # ── Phase 2: Room 邮件 ──────────────────────────────────────────────
         try:
-            room_emails = self.transport.fetch_phase2_emails(since_minutes=60)
-            for parsed in room_emails:
-                if parsed.sender == self.agent_email:
+            for parsed in self.transport.fetch_phase2_emails(since_minutes=60):
+                if parsed.sender == self.agent_email or not parsed.room_id:
                     continue
-                try:
-                    evts = self._handle_room_email(parsed)
+                room = self.store.load_room(parsed.room_id)
+                if not room:
+                    continue
+                self.store.save_pending_email(
+                    from_addr=parsed.sender, subject=parsed.subject,
+                    body=parsed.body, room_id=parsed.room_id,
+                )
+                room.record_round_reply(parsed.sender)
+                self.store.save_room(room)
+                if room.is_round_complete():
+                    pending = self.store.load_pending_for_room(parsed.room_id)
+                    evts = self._process_room_round(room, pending)
                     events.extend(evts)
-                except Exception as e:
-                    logger.error(f"Failed to process Room email [{parsed.subject}]: {e}", exc_info=True)
+                    for e in pending:
+                        self.store.mark_processed(e["id"])
         except Exception as e:
-            logger.error(f"Phase 2 room email fetch failed: {e}", exc_info=True)
+            logger.error(f"Phase 2 room poll failed: {e}", exc_info=True)
 
-        # ── Phase 1 + member commands ────────────────────────────────────────
-        events.extend(super().poll())
-
-        # 收取非 AIMP 邮件（成员指令等）
+        # ── Phase 1: AIMP session 邮件 ─────────────────────────────────────
         try:
-            all_emails = self.transport.fetch_all_unread_emails(since_minutes=60)
-            for parsed in all_emails:
-                # 跳过自己发的
+            for parsed in self.transport.fetch_aimp_emails(since_minutes=60):
+                if parsed.sender == self.agent_email or not parsed.session_id:
+                    continue
+                session = self.store.load(parsed.session_id)
+                if not session:
+                    continue
+                proto = extract_protocol_json(parsed)
+                proto_json = json.dumps(proto) if proto else None
+                self.store.save_pending_email(
+                    from_addr=parsed.sender, subject=parsed.subject,
+                    body=parsed.body, protocol_json=proto_json,
+                    session_id=parsed.session_id,
+                )
+                session.record_round_reply(parsed.sender)
+                self.store.save(session)
+                if session.is_round_complete():
+                    pending = self.store.load_pending_for_session(parsed.session_id)
+                    evts = self._process_session_round(session, pending)
+                    events.extend(evts)
+                    for e in pending:
+                        self.store.mark_processed(e["id"])
+        except Exception as e:
+            logger.error(f"Phase 1 session poll failed: {e}", exc_info=True)
+
+        # ── 成员指令：即时处理，仍先存库作审计 ──────────────────────────────
+        try:
+            for parsed in self.transport.fetch_all_unread_emails(since_minutes=60):
                 if parsed.sender == self.agent_email:
                     continue
-                # 已经有 [AIMP:] 的邮件在父类 poll 里处理过了（已标记已读），这里不会重复
-                # 检查是否是 Hub 成员
+                if "[AIMP:" in (parsed.subject or ""):
+                    continue  # 已由上面处理
+                self.store.save_pending_email(
+                    from_addr=parsed.sender, subject=parsed.subject, body=parsed.body,
+                )
                 member_id = self.identify_sender(parsed.sender)
                 if member_id:
                     evts = self.handle_member_command(
                         parsed.sender, parsed.body, subject=parsed.subject or ""
                     )
                     events.extend(evts)
+                elif self._is_auto_reply(parsed.sender, parsed.subject or ""):
+                    logger.debug(f"Skipping auto-reply/bounce from: {parsed.sender}")
+                    continue
                 else:
-                    # Skip bounce/auto-reply addresses entirely
-                    if self._is_auto_reply(parsed.sender, parsed.subject or ""):
-                        logger.debug(f"Skipping auto-reply/bounce from: {parsed.sender}")
-                        continue
-                    # Unknown sender — check for invite registration request first
                     invite_evts = self._check_invite_email(parsed)
                     if invite_evts is not None:
                         events.extend(invite_evts)
                     else:
-                        # Not an invite email → send registration guidance (throttled)
                         self._reply_unknown_sender(parsed.sender)
                         logger.debug(f"Sent registration guidance to unknown sender: {parsed.sender}")
         except Exception as e:
@@ -646,6 +677,174 @@ class AIMPHubAgent(AIMPAgent):
         except Exception as e:
             logger.error(f"Deadline check failed: {e}", exc_info=True)
 
+        return events
+
+    # ── Round Processing / 轮次处理 ─────────────────────────────────────
+
+    def _apply_votes_from_protocol(self, session: AIMPSession, proto: dict, from_addr: str):
+        """Apply votes embedded in an incoming protocol JSON to the session. /
+        将来自 protocol JSON 的投票应用到 session。"""
+        for item, item_data in proto.get("proposals", {}).items():
+            for opt in item_data.get("options", []):
+                if opt:
+                    session.add_option(item, opt)
+            voter_choice = item_data.get("votes", {}).get(from_addr)
+            if voter_choice:
+                try:
+                    session.apply_vote(from_addr, item, voter_choice)
+                except (ValueError, KeyError):
+                    pass
+
+    def _send_session_reply(self, session: AIMPSession, body: str, subject_suffix: str):
+        """Send an AIMP email to all session participants. /
+        向所有 session 参与者发送 AIMP 邮件。"""
+        recipients = [p for p in session.participants if p != self.agent_email]
+        refs = self.store.load_message_ids(session.session_id)
+        msg_id = self.transport.send_aimp_email(
+            to=recipients,
+            session_id=session.session_id,
+            version=session.version,
+            subject_suffix=subject_suffix,
+            body_text=body,
+            protocol_json=session.to_json(),
+            references=refs,
+        )
+        self.store.save_message_id(session.session_id, msg_id)
+
+    def _process_session_round(self, session: AIMPSession, pending: list[dict]) -> list[dict]:
+        """Process all pending emails for a completed session round. /
+        处理 session 中一轮已完成的所有待处理邮件。"""
+        events = []
+        for e in pending:
+            proto = json.loads(e["protocol_json"]) if e["protocol_json"] else None
+            if proto:
+                self._apply_votes_from_protocol(session, proto, e["from_addr"])
+            else:
+                _, details = self.negotiator.parse_human_reply(e["body"], session)
+                for item, choice in details.get("votes", {}).items():
+                    if choice:
+                        try:
+                            session.apply_vote(e["from_addr"], item, choice)
+                        except (ValueError, KeyError):
+                            session.add_option(item, choice)
+                            session.apply_vote(e["from_addr"], item, choice)
+
+        session.advance_round()
+
+        if session.is_fully_resolved():
+            session.status = "confirmed"
+            session.bump_version()
+            session.add_history(self.agent_email, "confirm", "所有议题达成共识")
+            body = self.negotiator.generate_confirm_summary(session)
+            self._send_session_reply(session, body, f"{session.topic} [已确认]")
+            events.append({"event": "consensus", "session_id": session.session_id,
+                           **session.check_consensus()})
+        elif session.is_stalled():
+            session.status = "escalated"
+            body = self.negotiator.generate_human_readable_summary(session, "escalate")
+            self._send_session_reply(session, body, session.topic)
+            events.append({"event": "escalation", "session_id": session.session_id})
+        else:
+            session.bump_version()
+            session.add_history(self.agent_email, "counter", f"第 {session.current_round} 轮汇总")
+            body = self.negotiator.generate_human_readable_summary(session, "counter")
+            self._send_session_reply(session, body, session.topic)
+            events.append({"event": "reply_sent", "session_id": session.session_id,
+                           "round": session.current_round})
+
+        self.store.save(session)
+        return events
+
+    def _apply_room_action(self, room: AIMPRoom, sender: str, action_data: dict):
+        """Apply a parsed room action to the room state. /
+        将解析好的 Room 动作应用到 Room 状态。"""
+        action = action_data.get("action", "AMEND").upper()
+        changes = action_data.get("changes", "")
+        reason = action_data.get("reason", "")
+        new_content = action_data.get("new_content")
+
+        if action == "ACCEPT":
+            if sender not in room.accepted_by:
+                room.accepted_by.append(sender)
+        elif action in ("PROPOSE", "AMEND") and new_content:
+            artifact_name = f"proposal_{sender.split('@')[0]}_{int(time.time())}.txt"
+            room.artifacts[artifact_name] = Artifact(
+                name=artifact_name,
+                content_type="text/plain",
+                body_text=new_content,
+                author=sender,
+                timestamp=time.time(),
+            )
+
+        summary = changes or reason or ""
+        sender_name = self._email_to_name(sender)
+        room.add_to_transcript(
+            from_agent=sender,
+            action=action,
+            summary=f"{sender_name}: {summary}",
+        )
+
+    def _send_room_reply(self, room: AIMPRoom, aggregate: dict):
+        """Broadcast aggregated round summary to all room participants. /
+        向所有参与者广播本轮汇总。"""
+        if self.notify_mode != "email":
+            return
+        current_proposal = aggregate.get("current_proposal", "")
+        summary_text = aggregate.get("summary", "")
+        accepted_count = len(room.accepted_by)
+        total = len(room.participants)
+        deadline_iso = self._ts_to_iso(room.deadline)
+
+        body = (
+            f"[协商室更新] {room.topic}\n\n"
+            f"第 {room.current_round} 轮汇总：\n\n"
+            f"{current_proposal}\n\n"
+            f"{'─' * 40}\n\n"
+            f"{summary_text}\n\n"
+            f"进度：{accepted_count}/{total} 人已 ACCEPT\n"
+            f"截止时间：{deadline_iso}\n\n"
+            f"回复 ACCEPT 同意当前提案，或继续发送 AMEND / PROPOSE 修改意见。\n\n"
+            f"— {self.hub_name}"
+        )
+        for participant in room.participants:
+            self.transport.send_human_email(
+                to=participant,
+                subject=f"[AIMP:Room:{room.room_id}] [第 {room.current_round} 轮] {room.topic}",
+                body=body,
+            )
+
+    def _process_room_round(self, room: AIMPRoom, pending: list[dict]) -> list[dict]:
+        """Process all pending emails for a completed room round. /
+        处理 Room 中一轮已完成的所有待处理邮件。"""
+        events = []
+        for e in pending:
+            sender = e["from_addr"]
+            if sender.lower() not in [p.lower() for p in room.participants]:
+                continue
+            action_data = self.room_negotiator.parse_amendment(
+                self._email_to_name(sender), e["body"],
+                {name: a.to_dict() for name, a in room.artifacts.items()}
+            )
+            self._apply_room_action(room, sender, action_data)
+
+        room.advance_round()
+
+        if room.all_accepted() or room.is_past_deadline():
+            evts = self._finalize_room(room)
+            if evts:
+                events.extend(evts)
+            else:
+                trigger = "all_accepted" if room.all_accepted() else "deadline_expired"
+                events.append({"type": "room_finalized", "room_id": room.room_id, "trigger": trigger})
+        else:
+            aggregate = self.room_negotiator.aggregate_amendments(room)
+            room.add_to_transcript(self.agent_email, "aggregate",
+                                   f"第 {room.current_round} 轮汇总")
+            self._send_room_reply(room, aggregate)
+            events.append({"event": "room_round", "room_id": room.room_id,
+                           "round": room.current_round})
+
+        self.store.save_room(room)
         return events
 
     # ── 通知 members ──────────────────────────────────
@@ -1695,21 +1894,24 @@ class AIMPHubAgent(AIMPAgent):
 # 工厂函数：根据 config 自动返回正确的 Agent 类型
 # ──────────────────────────────────────────────────────
 
-def create_agent(config_path: str, notify_mode: str = "email", db_path: str = None):
+def create_agent(config_path: str, notify_mode: str = "email", db_path: str = None) -> "AIMPHubAgent":
     """
-    Automatically select Agent type based on configuration file: / 根据配置文件自动选择 Agent 类型：
-      - Has "hub:" + "members:" -> AIMPHubAgent (Hub mode) / 有 "hub:" + "members:" → AIMPHubAgent（Hub 模式）
-      - Has "owner:" -> AIMPAgent (Standalone mode, backward compatible) / 有 "owner:" → AIMPAgent（独立模式，向后兼容）
+    Return an AIMPHubAgent for the given Hub config file. /
+    返回指定 Hub 配置文件对应的 AIMPHubAgent。
+
+    Raises ValueError if the config is not a Hub config (missing "members:" field). /
+    若配置文件不是 Hub 模式（缺少 members: 字段）则抛出 ValueError。
     """
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(os.path.expanduser(config_path), "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    if "members" in cfg or (cfg.get("mode") == "hub"):
-        logger.info("Hub mode configuration detected, using AIMPHubAgent / 检测到 Hub 模式配置，使用 AIMPHubAgent")
-        return AIMPHubAgent(config_path, notify_mode=notify_mode, db_path=db_path)
-    else:
-        logger.info("Standalone mode configuration detected, using AIMPAgent / 检测到独立模式配置，使用 AIMPAgent")
-        return AIMPAgent(config_path, notify_mode=notify_mode, db_path=db_path)
+    if "members" not in cfg and cfg.get("mode") != "hub":
+        raise ValueError(
+            f"配置文件 {config_path} 不是 Hub 模式（缺少 members: 字段）"
+        )
+
+    logger.info("Hub mode configuration detected, using AIMPHubAgent / 检测到 Hub 模式配置，使用 AIMPHubAgent")
+    return AIMPHubAgent(config_path, notify_mode=notify_mode, db_path=db_path)
 
 
 # ── Entry Point (Run Hub Agent standalone) / 入口（独立运行 Hub Agent）──────────────────────────

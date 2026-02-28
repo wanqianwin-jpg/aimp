@@ -117,6 +117,8 @@ class AIMPSession:
         self.history: list[HistoryEntry] = []
         self.status: str = "negotiating"  # negotiating | confirmed | escalated
         self.created_at: float = time.time()
+        self.current_round: int = 1
+        self.round_respondents: list[str] = []
 
         # Initialize voting slots for each participant / 初始化每个参与者的投票槽
         for item_name in ("time", "location"):
@@ -190,6 +192,31 @@ class AIMPSession:
         """Check if negotiation has exceeded maximum rounds / 检查协商是否超过最大轮数"""
         return self.round_count() >= MAX_ROUNDS
 
+    # ── Round Protocol / 轮次协议 ──────────────────────────────────────
+
+    def record_round_reply(self, from_email: str):
+        """Record a respondent for the current round (deduped) / 记录本轮回复者（去重）"""
+        if from_email not in self.round_respondents:
+            self.round_respondents.append(from_email)
+
+    def is_round_complete(self) -> bool:
+        """
+        Round 1: only non-initiators need to reply (initiator already spoke in Round 0).
+        Round 2+: all participants (incl. initiator) must reply.
+        第 1 轮：只需非发起方回复（发起方已在 Round 0 发出初始提案）。
+        第 2 轮起：所有参与者（含发起方）均需回复。
+        """
+        if self.current_round == 1:
+            expected = [p for p in self.participants if p != self.initiator]
+        else:
+            expected = list(self.participants)
+        return bool(expected) and all(e in self.round_respondents for e in expected)
+
+    def advance_round(self):
+        """Advance to the next round / 进入下一轮：轮次 +1，清空本轮回复者列表"""
+        self.current_round += 1
+        self.round_respondents = []
+
     # ── History Tracking / 历史记录 ──────────────────────────────────────
 
     def add_history(self, from_agent: str, action: str, summary: str):
@@ -216,6 +243,8 @@ class AIMPSession:
             "proposals": {name: item.to_dict() for name, item in self.proposals.items()},
             "status": self.status,
             "history": [h.to_dict() for h in self.history],
+            "current_round": self.current_round,
+            "round_respondents": list(self.round_respondents),
         }
 
     @classmethod
@@ -230,6 +259,8 @@ class AIMPSession:
         obj.status = data.get("status", "negotiating")
         obj.history = [HistoryEntry.from_dict(h) for h in data.get("history", [])]
         obj.created_at = time.time()
+        obj.current_round = data.get("current_round", 1)
+        obj.round_respondents = data.get("round_respondents", [])
 
         raw_proposals = data.get("proposals", {})
         obj.proposals = {}
@@ -308,6 +339,8 @@ class AIMPRoom:
     created_at: float = field(default_factory=time.time)
     resolution_rules: str = "majority"          # "majority" | "consensus" | "initiator_decides"
     accepted_by: list[str] = field(default_factory=list)                # emails that sent ACCEPT
+    current_round: int = 1
+    round_respondents: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict:
         return {
@@ -322,6 +355,8 @@ class AIMPRoom:
             "created_at": self.created_at,
             "resolution_rules": self.resolution_rules,
             "accepted_by": list(self.accepted_by),
+            "current_round": self.current_round,
+            "round_respondents": list(self.round_respondents),
         }
 
     @classmethod
@@ -341,6 +376,8 @@ class AIMPRoom:
         room.created_at = data.get("created_at", time.time())
         room.resolution_rules = data.get("resolution_rules", "majority")
         room.accepted_by = list(data.get("accepted_by", []))
+        room.current_round = data.get("current_round", 1)
+        room.round_respondents = data.get("round_respondents", [])
         return room
 
     def is_past_deadline(self) -> bool:
@@ -363,6 +400,29 @@ class AIMPRoom:
             summary=summary,
         )
         self.transcript.append(entry)
+
+    # ── Round Protocol / 轮次协议 ──────────────────────────────────────
+
+    def record_round_reply(self, from_email: str):
+        """Record a respondent for the current round (deduped) / 记录本轮回复者（去重）"""
+        if from_email not in self.round_respondents:
+            self.round_respondents.append(from_email)
+
+    def is_round_complete(self) -> bool:
+        """
+        Round 1: only non-initiators need to reply (initiator already spoke in Round 0).
+        Round 2+: all participants (incl. initiator) must reply.
+        """
+        if self.current_round == 1:
+            expected = [p for p in self.participants if p != self.initiator]
+        else:
+            expected = list(self.participants)
+        return bool(expected) and all(e in self.round_respondents for e in expected)
+
+    def advance_round(self):
+        """Advance to the next round / 进入下一轮：轮次 +1，清空本轮回复者列表"""
+        self.current_round += 1
+        self.round_respondents = []
 
     def __repr__(self):
         return (

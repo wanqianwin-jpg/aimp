@@ -51,6 +51,17 @@ class SessionStore:
                 status     TEXT NOT NULL DEFAULT 'open',
                 updated_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS pending_emails (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id    TEXT,
+                room_id       TEXT,
+                received_at   REAL NOT NULL,
+                from_addr     TEXT NOT NULL,
+                subject       TEXT,
+                body          TEXT,
+                protocol_json TEXT,
+                processed     INTEGER NOT NULL DEFAULT 0
+            );
         """)
         self._conn.commit()
 
@@ -130,6 +141,48 @@ class SessionStore:
             "SELECT data FROM rooms WHERE status = 'open' ORDER BY updated_at DESC"
         ).fetchall()
         return [AIMPRoom.from_json(json.loads(r[0])) for r in rows]
+
+    # ── Pending Email Store (Store-First) / 待处理邮件存储 ────────────────────────
+
+    def save_pending_email(self, from_addr: str, subject: str, body: str,
+                           protocol_json: str = None, session_id: str = None,
+                           room_id: str = None) -> int:
+        """Persist an incoming email before processing / 在处理前持久化收到的邮件"""
+        cur = self._conn.execute(
+            "INSERT INTO pending_emails "
+            "(session_id, room_id, received_at, from_addr, subject, body, protocol_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session_id, room_id, time.time(), from_addr, subject, body, protocol_json),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def load_pending_for_session(self, session_id: str) -> list[dict]:
+        """Load all unprocessed pending emails for a session / 加载 session 的所有未处理邮件"""
+        rows = self._conn.execute(
+            "SELECT id, from_addr, subject, body, protocol_json FROM pending_emails "
+            "WHERE session_id = ? AND processed = 0 ORDER BY received_at",
+            (session_id,)
+        ).fetchall()
+        return [{"id": r[0], "from_addr": r[1], "subject": r[2],
+                 "body": r[3], "protocol_json": r[4]} for r in rows]
+
+    def load_pending_for_room(self, room_id: str) -> list[dict]:
+        """Load all unprocessed pending emails for a room / 加载 Room 的所有未处理邮件"""
+        rows = self._conn.execute(
+            "SELECT id, from_addr, subject, body, protocol_json FROM pending_emails "
+            "WHERE room_id = ? AND processed = 0 ORDER BY received_at",
+            (room_id,)
+        ).fetchall()
+        return [{"id": r[0], "from_addr": r[1], "subject": r[2],
+                 "body": r[3], "protocol_json": r[4]} for r in rows]
+
+    def mark_processed(self, email_id: int):
+        """Mark a pending email as processed / 标记邮件为已处理"""
+        self._conn.execute(
+            "UPDATE pending_emails SET processed = 1 WHERE id = ?", (email_id,)
+        )
+        self._conn.commit()
 
     def close(self):
         """Close database connection / 关闭数据库连接"""
