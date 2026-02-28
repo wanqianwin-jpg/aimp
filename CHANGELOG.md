@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-02-28
+
+### Changed
+- Bump version to 0.2.1
+
 ## [0.2.0] - 2026-02-28
 
 ### Added
