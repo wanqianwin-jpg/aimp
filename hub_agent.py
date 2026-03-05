@@ -84,6 +84,9 @@ class AIMPHubAgent(SessionMixin, RoomMixin, CommandMixin, RegistrationMixin, AIM
         ) as f:
             yaml.dump(adapted, f, allow_unicode=True)
             self._adapted_config_path = f.name
+            
+        if db_path is None:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), "sessions.db")
 
         super().__init__(self._adapted_config_path, notify_mode=notify_mode, db_path=db_path)
 
@@ -198,7 +201,9 @@ class AIMPHubAgent(SessionMixin, RoomMixin, CommandMixin, RegistrationMixin, AIM
 
         # ── Phase 2: Room 邮件 ──────────────────────────────────────────────
         try:
+            logger.info("DEBUG: Checking Phase 2 emails...")
             for parsed in self.transport.fetch_phase2_emails(since_minutes=60):
+                logger.info(f"DEBUG: Fetched Phase 2 from {parsed.sender}")
                 if parsed.sender == self.agent_email or not parsed.room_id:
                     continue
                 room = self.store.load_room(parsed.room_id)
@@ -221,76 +226,96 @@ class AIMPHubAgent(SessionMixin, RoomMixin, CommandMixin, RegistrationMixin, AIM
 
         # ── Phase 1: AIMP session 邮件 ─────────────────────────────────────
         try:
+            logger.info("DEBUG: Checking Phase 1 emails...")
             for parsed in self.transport.fetch_aimp_emails(since_minutes=60):
+                logger.info(f"DEBUG: Fetched Phase 1 from {parsed.sender}")
+                logger.info(f"DEBUG: Fetched Phase 1 from {parsed.sender} for session {parsed.session_id}")
                 if parsed.sender == self.agent_email or not parsed.session_id:
                     continue
                 session = self.store.load(parsed.session_id)
                 if not session:
+                    logger.warning(f"Session {parsed.session_id} not found")
                     continue
-                proto = extract_protocol_json(parsed)
-                proto_json = json.dumps(proto) if proto else None
-                self.store.save_pending_email(
-                    from_addr=parsed.sender, subject=parsed.subject,
-                    body=parsed.body, protocol_json=proto_json,
-                    session_id=parsed.session_id,
-                )
-                session.record_round_reply(parsed.sender)
-                self.store.save(session)
-                if session.is_round_complete():
-                    pending = self.store.load_pending_for_session(parsed.session_id)
-                    evts = self._process_session_round(session, pending)
-                    events.extend(evts)
-                    for e in pending:
-                        self.store.mark_processed(e["id"])
+
+                if is_aimp_email(parsed):
+                    logger.info(f"DEBUG: Processing protocol email for session {parsed.session_id}")
+                    events.extend(self.handle_session_email(session, parsed))
+                elif session.status == "negotiating":
+                    logger.info(f"DEBUG: Processing human reply for session {parsed.session_id}")
+                    self.store.save_pending_email(
+                        from_addr=parsed.sender, subject=parsed.subject,
+                        body=parsed.body, session_id=parsed.session_id,
+                    )
+                    session.record_round_reply(parsed.sender)
+                    self.store.save(session)
+                    
+                    if session.is_round_complete():
+                        logger.info(f"DEBUG: Round complete for session {parsed.session_id}, processing...")
+                        pending = self.store.load_pending_for_session(parsed.session_id)
+                        events.extend(self._process_session_round(session, pending))
+                        for e in pending:
+                            self.store.mark_processed(e["id"])
+                else:
+                    logger.info(f"DEBUG: Skipping session email from {parsed.sender} (status={session.status})")
         except Exception as e:
             logger.error(f"Phase 1 session poll failed: {e}", exc_info=True)
 
+        # ── 检查卡住的会话（例如因 SMTP 发送失败而未切轮次） ─────────────────────
+        try:
+            active_sessions = self.store.load_active()
+            for session in active_sessions:
+                if session.status == "negotiating" and session.is_round_complete():
+                    pending = self.store.load_pending_for_session(session.session_id)
+                    if pending:
+                        logger.info(f"DEBUG: Found stuck session {session.session_id}, retry processing round...")
+                        events.extend(self._process_session_round(session, pending))
+                        for e in pending:
+                            self.store.mark_processed(e["id"])
+        except Exception as e:
+            logger.error(f"Stuck session sweep failed: {e}", exc_info=True)
+
         # ── 成员指令：即时处理，仍先存库作审计 ──────────────────────────────
         try:
+            logger.info("DEBUG: Checking All Unread emails for commands...")
             for parsed in self.transport.fetch_all_unread_emails(since_minutes=60):
-                if parsed.sender == self.agent_email:
-                    continue
-                subj = parsed.subject or ""
-                if "[AIMP:Room:" in subj or is_aimp_email(parsed):
-                    continue  # 已由 Phase 1 / Phase 2 处理（有 protocol.json 或 Room 邮件）
+                try:
+                    logger.info(f"DEBUG: Fetched unread email from {parsed.sender} with subject {parsed.subject}")
+                    if parsed.sender == self.agent_email or "10000@qq.com" in parsed.sender:
+                        logger.info(f"DEBUG: Skipping excluded sender: {parsed.sender}")
+                        continue
+                    subj = parsed.subject or ""
+                    if "[AIMP:Room:" in subj or is_aimp_email(parsed):
+                        logger.info("DEBUG: Skipping because it belongs to Phase 1 or Room logic")
+                        continue  # 已由 Phase 1 / Phase 2 处理（有 protocol.json 或 Room 邮件）
 
-                # 人类对 session 邮件的回复（有 [AIMP:] 但无 protocol.json）→ 作为人工投票入库
-                if "[AIMP:" in subj and parsed.session_id:
-                    session = self.store.load(parsed.session_id)
-                    if session and session.status == "negotiating":
-                        self.store.save_pending_email(
-                            from_addr=parsed.sender, subject=parsed.subject,
-                            body=parsed.body, session_id=parsed.session_id,
-                        )
-                        session.record_round_reply(parsed.sender)
-                        self.store.save(session)
-                        if session.is_round_complete():
-                            pending = self.store.load_pending_for_session(parsed.session_id)
-                            evts = self._process_session_round(session, pending)
-                            events.extend(evts)
-                            for e in pending:
-                                self.store.mark_processed(e["id"])
-                    continue
+                    # ── 后面移除了人类对 session 邮件的回复逻辑，已合并到 Phase 1 处理 ────────────────
+                    
 
-                self.store.save_pending_email(
-                    from_addr=parsed.sender, subject=parsed.subject, body=parsed.body,
-                )
-                member_id = self.identify_sender(parsed.sender)
-                if member_id:
-                    evts = self.handle_member_command(
-                        parsed.sender, parsed.body, subject=parsed.subject or ""
+                    logger.info(f"DEBUG: Saving pending general email from {parsed.sender}")
+                    self.store.save_pending_email(
+                        from_addr=parsed.sender, subject=parsed.subject, body=parsed.body,
                     )
-                    events.extend(evts)
-                elif self._is_auto_reply(parsed.sender, parsed.subject or ""):
-                    logger.debug(f"Skipping auto-reply/bounce from: {parsed.sender}")
-                    continue
-                else:
-                    invite_evts = self._check_invite_email(parsed)
-                    if invite_evts is not None:
-                        events.extend(invite_evts)
+                    member_id = self.identify_sender(parsed.sender)
+                    logger.info(f"DEBUG: identify_sender({parsed.sender}) returned {member_id}")
+                    if member_id:
+                        evts = self.handle_member_command(
+                            parsed.sender, parsed.body, subject=parsed.subject or ""
+                        )
+                        events.extend(evts)
+                    elif self._is_auto_reply(parsed.sender, parsed.subject or ""):
+                        logger.debug(f"Skipping auto-reply/bounce from: {parsed.sender}")
+                        continue
                     else:
-                        self._reply_unknown_sender(parsed.sender)
-                        logger.debug(f"Sent registration guidance to unknown sender: {parsed.sender}")
+                        invite_evts = self._check_invite_email(parsed)
+                        if invite_evts is not None:
+                            events.extend(invite_evts)
+                        else:
+                            logger.info("DEBUG: Sending unknown sender guidance")
+                            self._reply_unknown_sender(parsed.sender)
+                            logger.debug(f"Sent registration guidance to unknown sender: {parsed.sender}")
+                except Exception as inner_e:
+                    logger.error(f"Single email processing failed: {inner_e}")
+                    continue
         except Exception as e:
             logger.error(f"Hub member email fetch failed: {e}", exc_info=True)
 

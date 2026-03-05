@@ -33,6 +33,14 @@ class RoomMixin:
         room_id = f"room-{int(time.time())}-{uuid.uuid4().hex[:6]}"
         deadline_iso = self._ts_to_iso(deadline)
 
+        # Safety net: Hub's own address must never be a participant (would cause IMAP loopback)
+        hub_email = self.agent_email.lower()
+        if hub_email in [p.lower() for p in participants]:
+            logger.warning(
+                f"[{room_id}] Hub self-address {self.agent_email} removed from participants list"
+            )
+            participants = [p for p in participants if p.lower() != hub_email]
+
         room = AIMPRoom(
             room_id=room_id,
             topic=topic,

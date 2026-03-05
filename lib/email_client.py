@@ -5,6 +5,7 @@ import imaplib
 import smtplib
 import email
 import json
+import os
 import time
 import logging
 import base64
@@ -44,10 +45,28 @@ def _decode_str(s) -> str:
     result = []
     for part, encoding in parts:
         if isinstance(part, bytes):
-            result.append(part.decode(encoding or "utf-8", errors="replace"))
+            enc = encoding or "utf-8"
+            # Normalize non-standard charset names that Python doesn't recognize
+            if isinstance(enc, str) and enc.lower() in ("unknown-8bit", "x-unknown", "unknown"):
+                enc = "latin-1"
+            try:
+                result.append(part.decode(enc, errors="replace"))
+            except (LookupError, UnicodeDecodeError):
+                result.append(part.decode("latin-1", errors="replace"))
         else:
             result.append(part)
     return "".join(result)
+
+
+def _safe_decode(payload: bytes, charset: str) -> str:
+    """Decode bytes with charset, falling back to latin-1 for non-standard encodings."""
+    # Normalize known non-standard charset names
+    if charset and charset.lower() in ("unknown-8bit", "x-unknown", "unknown"):
+        charset = "latin-1"
+    try:
+        return payload.decode(charset or "utf-8", errors="replace")
+    except (LookupError, UnicodeDecodeError):
+        return payload.decode("latin-1", errors="replace")
 
 
 def _extract_session_id(subject: str) -> Optional[str]:
@@ -81,6 +100,16 @@ class EmailClient:
         # True → SMTP+STARTTLS (port 587, required by Outlook/Office365)
         # False → SMTP_SSL (port 465, used by Gmail/QQ/163)
         self.smtp_use_starttls = smtp_use_starttls
+
+        # SMTP rate limiting: enforce minimum delay between consecutive sends
+        # to avoid triggering anti-spam disconnections on QQ/163/etc.
+        self._last_send_time: float = 0.0
+        self._min_send_interval: float = 2.5  # seconds between SMTP connections
+
+        # IMAP incremental UID sync: persist last seen UID per fetch channel
+        # so restarts don't re-fetch thousands of old emails.
+        self._imap_state_file = os.path.expanduser("~/.aimp/imap_state.json")
+        self._last_uid: dict = self._load_imap_state()
 
         # OAuth2 token management / OAuth2 令牌管理
         self.access_token = self.oauth_params.get("access_token")
@@ -133,12 +162,39 @@ class EmailClient:
             self._refresh_access_token()
 
     # ──────────────────────────────────────────────
+    # IMAP UID state persistence
+    # ──────────────────────────────────────────────
+
+    def _load_imap_state(self) -> dict:
+        """Load persisted last-seen UIDs from disk. Returns empty dict on first run."""
+        try:
+            with open(self._imap_state_file) as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_imap_state(self):
+        """Persist last-seen UIDs to disk so restarts skip already-seen emails."""
+        try:
+            os.makedirs(os.path.dirname(self._imap_state_file), exist_ok=True)
+            with open(self._imap_state_file, "w") as f:
+                json.dump(self._last_uid, f)
+        except Exception as e:
+            logger.warning(f"Failed to save IMAP UID state: {e}")
+
+    # ──────────────────────────────────────────────
     # IMAP
     # ──────────────────────────────────────────────
 
     def _imap_connect(self) -> imaplib.IMAP4_SSL:
         try:
-            conn = imaplib.IMAP4_SSL(self.imap_server, self.imap_port, timeout=self.timeout)
+            import ssl
+            context = ssl.create_default_context()
+            # Disable TLS 1.3 to avoid EOF issues on some networks (some 163.com/QQ networks have problems)
+            # context.options |= ssl.OP_NO_TLSv1_3 
+            
+
+            conn = imaplib.IMAP4_SSL(self.imap_server, self.imap_port, ssl_context=context, timeout=self.timeout)
             if self.auth_type == "oauth2":
                 self._ensure_valid_token()
                 conn.authenticate("XOAUTH2", lambda x: self._generate_xoauth2_bytes(self.access_token))
@@ -170,12 +226,19 @@ class EmailClient:
             since_dt = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
             date_str = since_dt.strftime("%d-%b-%Y")
 
-            # Filter by UNSEEN and subject prefix / 同时过滤 UNSEEN 和包含 [AIMP: 的 subject
-            status, uids = conn.search(None, f'(UNSEEN SUBJECT "[AIMP:" SINCE {date_str})')
+            # Filter by UNFLAGGED and subject prefix / 同时过滤 UNFLAGGED 和包含 [AIMP: 的 subject
+            status, uids = conn.search(None, f'(UNFLAGGED SUBJECT "[AIMP:" SINCE {date_str})')
             if status != "OK":
                 return results
 
             uid_list = uids[0].split()
+            # Incremental UID sync: skip emails we've already seen on previous runs
+            imap_key = f"fetch_aimp:{self.email_addr}"
+            last_uid = self._last_uid.get(imap_key, 0)
+            uid_list = [u for u in uid_list if int(u) > last_uid]
+            uid_list = uid_list[:100]  # safety cap — process oldest-first
+
+            max_seen_uid = last_uid
             for uid in uid_list:
                 try:
                     status, data = conn.fetch(uid, "(RFC822)")
@@ -185,15 +248,21 @@ class EmailClient:
                     msg = email.message_from_bytes(raw)
                     parsed = self._parse_email(msg)
 
-                    # Precise filtering by since_minutes / 按 since_minutes 精确过滤
-                    if parsed:
+                    if parsed and parsed.session_id and not parsed.room_id:
                         results.append(parsed)
-                        # Mark as seen / 标记为已读
+                        # Mark as seen and flagged (only if we truly handled it)
+                        # 标记为已读和星标（仅当我们确实处理了它）
                         conn.store(uid, "+FLAGS", "\\Seen")
+                        conn.store(uid, "+FLAGS", "\\Flagged")
+                    # Always advance the UID cursor even for non-matching emails
+                    max_seen_uid = max(max_seen_uid, int(uid))
                 except Exception as e:
                     logger.warning(f"Failed to parse email uid={uid}: {e} / 解析邮件 uid={uid} 失败: {e}")
 
             conn.logout()
+            if max_seen_uid > last_uid:
+                self._last_uid[imap_key] = max_seen_uid
+                self._save_imap_state()
         except Exception as e:
             logger.error(f"IMAP connection failed: {e} / IMAP 连接失败: {e}")
         return results
@@ -211,13 +280,20 @@ class EmailClient:
             since_dt = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
             date_str = since_dt.strftime("%d-%b-%Y")
 
-            # Only filter by UNSEEN and date, no subject constraint /
+            # Only filter by UNFLAGGED and date, no subject constraint /
             # 只过滤未读和日期，不限制 subject
-            status, uids = conn.search(None, f'(UNSEEN SINCE {date_str})')
+            status, uids = conn.search(None, f'(UNFLAGGED SINCE {date_str})')
             if status != "OK":
                 return results
 
             uid_list = uids[0].split()
+            # Incremental UID sync: skip emails we've already seen on previous runs
+            imap_key = f"fetch_all:{self.email_addr}"
+            last_uid = self._last_uid.get(imap_key, 0)
+            uid_list = [u for u in uid_list if int(u) > last_uid]
+            uid_list = uid_list[:100]  # safety cap
+
+            max_seen_uid = last_uid
             for uid in uid_list:
                 try:
                     status, data = conn.fetch(uid, "(RFC822)")
@@ -228,18 +304,29 @@ class EmailClient:
                     parsed = self._parse_email(msg)
                     if parsed:
                         results.append(parsed)
-                        conn.store(uid, "+FLAGS", "\\Seen")
+                    conn.store(uid, "+FLAGS", "\\Seen")
+                    conn.store(uid, "+FLAGS", "\\Flagged")
+                    max_seen_uid = max(max_seen_uid, int(uid))
                 except Exception as e:
                     logger.warning(f"Failed to parse email uid={uid}: {e}")
 
             conn.logout()
+            if max_seen_uid > last_uid:
+                self._last_uid[imap_key] = max_seen_uid
+                self._save_imap_state()
         except Exception as e:
             logger.error(f"IMAP connection failed: {e} / IMAP 连接失败: {e}")
         return results
 
     def _parse_email(self, msg) -> Optional[ParsedEmail]:
         subject = _decode_str(msg.get("Subject", ""))
-        sender = _decode_str(msg.get("From", ""))
+        sender_full = _decode_str(msg.get("From", ""))
+        logger.info(f"DEBUGGING _parse_email: subject='{subject}', from='{sender_full}'")
+        from email.utils import parseaddr
+        sender_name, sender = parseaddr(sender_full)
+        if not sender:
+            sender = sender_full
+            sender = sender_full
         # Extract pure email address / 提取纯邮件地址
         import re
         sender_match = re.search(r"[\w.+\-]+@[\w.\-]+", sender)
@@ -262,7 +349,11 @@ class EmailClient:
                 if ct == "text/plain" and "attachment" not in cd:
                     payload = part.get_payload(decode=True)
                     if payload:
-                        body = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+                        try:
+                            charset = part.get_content_charset() or "utf-8"
+                        except Exception:
+                            charset = "utf-8"
+                        body = _safe_decode(payload, charset)
                 elif part.get_filename():
                     fname = _decode_str(part.get_filename())
                     payload = part.get_payload(decode=True)
@@ -270,7 +361,11 @@ class EmailClient:
         else:
             payload = msg.get_payload(decode=True)
             if payload:
-                body = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
+                try:
+                    charset = msg.get_content_charset() or "utf-8"
+                except Exception:
+                    charset = "utf-8"
+                body = _safe_decode(payload, charset)
 
         # Parse recipients / 解析 recipients
         to_raw = _decode_str(msg.get("To", ""))
@@ -327,7 +422,9 @@ class EmailClient:
                 conn.ehlo()
             else:
                 # SSL mode (port 465): Gmail, QQ, 163, etc.
-                conn = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, timeout=self.timeout)
+                import ssl
+                context = ssl.create_default_context()
+                conn = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context, timeout=self.timeout)
 
             if self.auth_type == "oauth2":
                 self._ensure_valid_token()
@@ -471,12 +568,19 @@ class EmailClient:
             since_dt = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
             date_str = since_dt.strftime("%d-%b-%Y")
 
-            status, uids = conn.search(None, f'(UNSEEN SUBJECT "[AIMP:Room:" SINCE {date_str})')
+            status, uids = conn.search(None, f'(UNFLAGGED SUBJECT "[AIMP:Room:" SINCE {date_str})')
             if status != "OK":
                 conn.logout()
                 return results
 
             uid_list = uids[0].split()
+            # Incremental UID sync: skip emails we've already seen on previous runs
+            imap_key = f"fetch_phase2:{self.email_addr}"
+            last_uid = self._last_uid.get(imap_key, 0)
+            uid_list = [u for u in uid_list if int(u) > last_uid]
+            uid_list = uid_list[:100]  # safety cap
+
+            max_seen_uid = last_uid
             for uid in uid_list:
                 try:
                     status, data = conn.fetch(uid, "(RFC822)")
@@ -488,10 +592,15 @@ class EmailClient:
                     if parsed and parsed.room_id:
                         results.append(parsed)
                         conn.store(uid, "+FLAGS", "\\Seen")
+                        conn.store(uid, "+FLAGS", "\\Flagged")
+                    max_seen_uid = max(max_seen_uid, int(uid))
                 except Exception as e:
                     logger.warning(f"Failed to parse Phase 2 email uid={uid}: {e}")
 
             conn.logout()
+            if max_seen_uid > last_uid:
+                self._last_uid[imap_key] = max_seen_uid
+                self._save_imap_state()
         except Exception as e:
             logger.error(f"IMAP Phase 2 fetch failed: {e} / IMAP Phase 2 获取失败: {e}")
         return results
@@ -510,19 +619,35 @@ class EmailClient:
         logger.info(f"Human email sent: {subject} -> {to} / 已发送人类邮件: {subject} -> {to}")
 
     def _smtp_send(self, to: list[str], msg):
-        conn = None
-        try:
-            conn = self._smtp_connect()
-            conn.sendmail(self.email_addr, to, msg.as_string())
-        except Exception as e:
-            logger.error(f"SMTP sending failed: {e} / SMTP 发送失败: {e}")
-            raise
-        finally:
-            if conn:
-                try:
-                    conn.quit()
-                except Exception:
-                    pass
+        # Rate limiting: enforce minimum interval between consecutive sends
+        # to avoid SMTPServerDisconnected from QQ/163 anti-spam throttling.
+        elapsed = time.time() - self._last_send_time
+        if elapsed < self._min_send_interval:
+            time.sleep(self._min_send_interval - elapsed)
+
+        max_retries = 3
+        for attempt in range(max_retries):
+            conn = None
+            try:
+                conn = self._smtp_connect()
+                conn.sendmail(self.email_addr, to, msg.as_string())
+                self._last_send_time = time.time()
+                return  # Success
+            except smtplib.SMTPServerDisconnected as e:
+                logger.warning(f"SMTP Server Disconnected (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt == max_retries - 1:
+                    logger.error(f"SMTP sending failed after {max_retries} retries: {e}")
+                    raise
+                time.sleep(2 ** attempt)
+            except Exception as e:
+                logger.error(f"SMTP sending failed: {e} / SMTP 发送失败: {e}")
+                raise
+            finally:
+                if conn:
+                    try:
+                        conn.quit()
+                    except Exception:
+                        pass
 
 
 def is_aimp_email(parsed: ParsedEmail) -> bool:

@@ -217,12 +217,17 @@ class CommandMixin:
                 )
             return [{"type": "member_info_requested", "member_id": member_id, "missing": ["contact_emails"], "unknown": unknown_names}]
 
-        # Build participant email list
+        # Build participant email list (Hub's own address is never a participant)
         participant_emails = [from_email]
         for name in participant_names:
             contact = self._find_participant_contact(name)
             if contact and contact["email"] not in participant_emails:
                 participant_emails.append(contact["email"])
+        # Guard: silently remove Hub's own email if it somehow ended up in the list
+        participant_emails = [
+            e for e in participant_emails
+            if e.lower() != self.agent_email.lower()
+        ]
 
         try:
             room_id = self.initiate_room(
